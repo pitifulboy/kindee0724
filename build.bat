@@ -1,0 +1,6 @@
+@echo off
+cd /d D:\111111vc
+echo 正在构建生产版本...
+npm run build
+echo 构建完成！
+pause

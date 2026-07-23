@@ -1,0 +1,14 @@
+node_modules
+node_cache
+dist
+dist-electron
+release
+*.log
+.DS_Store
+pdf-test-local
+pdf-methods-test
+soybean-test
+specific-pdf-test
+python-service
+overview.md
+参考.txt

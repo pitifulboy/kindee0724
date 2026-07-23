@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "outDir": "dist-electron",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "include": [
+    "vite.config.ts",
+    "electron-builder.config.js",
+    "src-electron/main/**/*",
+    "src-electron/preload/**/*"
+  ]
+}
