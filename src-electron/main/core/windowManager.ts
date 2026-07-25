@@ -11,7 +11,8 @@ export function createMainWindow(): BrowserWindow {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: '离线办公工具',
+    title: '金蝶模板生成（新味智选）',
+    autoHideMenuBar: true,
     icon: path.join(__dirname, '../../build/icon.ico'),
     webPreferences: {
       nodeIntegration: false,

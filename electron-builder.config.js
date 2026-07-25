@@ -1,9 +1,9 @@
 const path = require('path')
 
 module.exports = {
-  appId: 'com.electron.office',
-  productName: '离线办公工具',
-  copyright: 'Copyright © 2024',
+  appId: 'com.xinweizhixuan.kingdee.template',
+  productName: '金蝶模板生成（新味智选）',
+  copyright: 'Copyright © 2024 新味智选',
   directories: {
     output: 'release',
     buildResources: 'build'
@@ -11,14 +11,6 @@ module.exports = {
   files: [
     'dist/**/*',
     'dist-electron/**/*',
-    'extra-resources/**/*',
-    'node_modules/pdfjs-dist/**/*',
-    'node_modules/@napi-rs/canvas/**/*',
-    'node_modules/@napi-rs/canvas-win32-x64-msvc/**/*',
-    'node_modules/pdf-lib/**/*',
-    'node_modules/@pdf-lib/**/*',
-    'node_modules/pako/**/*',
-    'node_modules/tslib/**/*',
     // ─── exceljs 及其运行时依赖 ───
     'node_modules/exceljs/**/*',
     'node_modules/archiver/**/*',
@@ -73,13 +65,6 @@ module.exports = {
     'node_modules/buffer-from/**/*',
     'node_modules/immediate/**/*'
   ],
-  extraResources: [
-    {
-      from: 'extra-resources',
-      to: 'extra-resources',
-      filter: ['**/*']
-    }
-  ],
   win: {
     target: [
       {
@@ -87,7 +72,7 @@ module.exports = {
         arch: ['x64']
       }
     ],
-    artifactName: '${productName}-${version}-Setup.${ext}'
+    artifactName: '${productName}-v${version}-Setup.${ext}'
   },
   nsis: {
     oneClick: false,
@@ -96,12 +81,10 @@ module.exports = {
     deleteAppDataOnUninstall: false,
     createDesktopShortcut: true,
     createStartMenuShortcut: true,
-    shortcutName: '离线办公工具',
+    shortcutName: '金蝶模板生成（新味智选）',
     installerIcon: path.resolve(__dirname, 'build/icon.ico'),
     uninstallerIcon: path.resolve(__dirname, 'build/icon.ico'),
     installerHeaderIcon: path.resolve(__dirname, 'build/icon.ico')
   },
-  // 暂时禁用 asar —— @napi-rs/canvas 原生模块需要直接文件系统访问
-  // 后续可通过 asarUnpack 精细控制，当前优先保证功能可用
-  asar: false
+  asar: true
 }

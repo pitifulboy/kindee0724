@@ -9,85 +9,6 @@ interface IpcResponse<T = any> {
   error?: string
 }
 
-// ─── PDF转图片 ───
-interface PdfConvertOptions {
-  filePaths: string[]
-  outputDir: string
-  format: 'png' | 'jpg'
-  scale: number
-  quality?: number
-  pageRange?: string
-}
-
-interface PdfConvertProgress {
-  currentFile: string
-  currentFileIndex: number
-  totalFiles: number
-  currentPage: number
-  totalPages: number
-  overallProgress: number
-  status: 'pending' | 'converting' | 'completed' | 'error'
-  message?: string
-}
-
-// ─── 图片转PDF ───
-interface ImageToPdfOptions {
-  filePaths: string[]
-  outputPath: string
-  pageSize: 'fit' | 'a4' | 'letter'
-  orientation: 'portrait' | 'landscape'
-  margin: number
-  quality: number
-}
-
-interface ImageToPdfProgress {
-  currentFile: string
-  currentFileIndex: number
-  totalFiles: number
-  overallProgress: number
-  status: 'pending' | 'converting' | 'completed' | 'error'
-  message?: string
-}
-
-// ─── PDF合并 ───
-interface PdfMergeOptions {
-  filePaths: string[]
-  outputPath: string
-}
-
-interface PdfMergeProgress {
-  currentFile: string
-  currentFileIndex: number
-  totalFiles: number
-  overallProgress: number
-  status: 'pending' | 'merging' | 'completed' | 'error'
-  message?: string
-}
-
-// ─── PDF拆分 ───
-interface PdfSplitOptions {
-  filePath: string
-  outputDir: string
-  mode: 'range' | 'eachPage' | 'everyN'
-  pageRanges?: string
-  pagesPerFile?: number
-  filePrefix?: string
-}
-
-interface PdfSplitProgress {
-  currentPart: number
-  totalParts: number
-  overallProgress: number
-  status: 'pending' | 'splitting' | 'completed' | 'error'
-  message?: string
-}
-
-interface PdfSplitResult {
-  success: boolean
-  outputFiles: string[]
-  error?: string
-}
-
 declare global {
   interface Window {
     electronAPI: {
@@ -97,35 +18,6 @@ declare global {
           multiSelections?: boolean
         }) => Promise<{ canceled: boolean; filePaths: string[] }>
         openFolder: () => Promise<{ canceled: boolean; filePaths: string[] }>
-      }
-      pdfConvert: {
-        convert: (options: PdfConvertOptions) => Promise<IpcResponse<{ outputImages: string[] }>>
-        onProgress: (callback: (progress: PdfConvertProgress) => void) => () => void
-        cancel: () => Promise<IpcResponse>
-      }
-      imageToPdf: {
-        convert: (options: ImageToPdfOptions) => Promise<IpcResponse<{ outputPath: string }>>
-        onProgress: (callback: (progress: ImageToPdfProgress) => void) => () => void
-        cancel: () => Promise<IpcResponse>
-      }
-      pdfMerge: {
-        merge: (options: PdfMergeOptions) => Promise<IpcResponse<{ outputPath: string; totalPages: number }>>
-        mergeFromImages: (data: {
-          pagesData: { imageData: string; width: number; height: number }[][]
-          outputPath: string
-          fileNames: string[]
-        }) => Promise<IpcResponse<{ outputPath: string; totalPages: number }>>
-        onProgress: (callback: (progress: PdfMergeProgress) => void) => () => void
-        cancel: () => Promise<IpcResponse>
-      }
-      pdfSplit: {
-        split: (options: PdfSplitOptions) => Promise<IpcResponse<PdfSplitResult>>
-        splitFromImages: (data: {
-          pagesData: { imageData: string; width: number; height: number }[]
-          options: PdfSplitOptions
-        }) => Promise<IpcResponse<PdfSplitResult>>
-        onProgress: (callback: (progress: PdfSplitProgress) => void) => () => void
-        cancel: () => Promise<IpcResponse>
       }
       excelMerge: {
         listPresets: () => Promise<IpcResponse<any[]>>
@@ -147,17 +39,72 @@ declare global {
         generate: (params: { config: any }) => Promise<IpcResponse<any>>
         onProgress: (callback: (progress: any) => void) => () => void
         cancel: () => Promise<IpcResponse>
-      }
-      file: {
-        readImage: (filePath: string) => Promise<IpcResponse<string>>
-        getFileInfo: (filePath: string) => Promise<IpcResponse<{ size: number; name: string }>>
-        scanPdfsInDir: (folderPath: string) => Promise<IpcResponse<{ files: { path: string; name: string; size: number }[] }>>
+        step1: (params: {
+          table1Path: string
+          groupByColumn: string
+          startBillNo: number
+          outputDir: string
+        }) => Promise<IpcResponse<any>>
+        step2a: (params: {
+          table1Path: string
+          table2Path: string
+          groupByColumn: string
+          matchFieldTable1: string
+          matchFieldTable2: string
+          startBillNo: number
+          templateHeaderRowIndex: number
+          templateDataStartRowIndex: number
+          outputDir: string
+        }) => Promise<IpcResponse<any>>
+        step2b: (params: {
+          inputDir: string
+          outputDir: string
+        }) => Promise<IpcResponse<any>>
+        step2c: (params: {
+          inputDir: string
+          fieldMappings: any[]
+          date: string
+          matchFieldTable1: string
+          matchFieldTable2: string
+          templateHeaderRowIndex: number
+          templateDataStartRowIndex: number
+          table2Path: string
+          outputDir: string
+        }) => Promise<IpcResponse<any>>
+        step2d: (params: {
+          inputDir: string
+          table2Path: string
+          templateHeaderRowIndex: number
+          templateDataStartRowIndex: number
+          outputDir: string
+        }) => Promise<IpcResponse<any>>
+        step3: (params: {
+          table2Path: string
+          filledTemplateFiles: { filePath: string }[]
+          templateHeaderRowIndex: number
+          templateDataStartRowIndex: number
+          outputDir: string
+          outputPrefix: string
+          textFormatColumns: string[]
+        }) => Promise<IpcResponse<any>>
       }
       app: {
         getPath: (name: 'home' | 'appData' | 'userData' | 'temp' | 'desktop' | 'documents') => Promise<string>
       }
+      file: {
+        listExcelFiles: (dirPath: string) => Promise<IpcResponse<{ path: string; name: string }[]>>
+      }
       shell: {
         openPath: (path: string) => Promise<IpcResponse>
+      }
+      project: {
+        list: () => Promise<IpcResponse<any[]>>
+        get: (id: string) => Promise<IpcResponse<any>>
+        save: (project: any) => Promise<IpcResponse>
+        delete: (id: string) => Promise<IpcResponse>
+        rename: (id: string, newName: string) => Promise<IpcResponse>
+        updateStep1: (id: string, preset: any) => Promise<IpcResponse>
+        updateStep2: (id: string, preset: any) => Promise<IpcResponse>
       }
     }
   }

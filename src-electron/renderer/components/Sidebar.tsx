@@ -1,72 +1,145 @@
-import React from 'react'
-import { moduleRegistry, type ModuleDef } from './moduleRegistry'
+import React, { useState } from 'react'
 
-interface SidebarProps {
-  activeModuleId: string
-  onModuleChange: (moduleId: string) => void
+interface ProjectListItem {
+  id: string
+  name: string
+  updatedAt: string
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ activeModuleId, onModuleChange }) => {
+interface SidebarProps {
+  projects: ProjectListItem[]
+  activeProjectId: string | null
+  onSelectProject: (id: string) => void
+  onAddProject: () => void
+  onRenameProject: (id: string, newName: string) => void
+  onDeleteProject: (id: string) => void
+}
+
+const Sidebar: React.FC<SidebarProps> = ({
+  projects, activeProjectId,
+  onSelectProject, onAddProject, onRenameProject, onDeleteProject
+}) => {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+
+  const handleStartRename = (id: string, currentName: string) => {
+    setEditingId(id)
+    setEditName(currentName)
+  }
+
+  const handleFinishRename = () => {
+    if (editingId && editName.trim()) {
+      onRenameProject(editingId, editName.trim())
+    }
+    setEditingId(null)
+    setEditName('')
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') handleFinishRename()
+    if (e.key === 'Escape') { setEditingId(null); setEditName('') }
+  }
+
   return (
-    <aside className="w-60 bg-white border-r border-gray-100 flex flex-col h-full">
-      {/* Logo区域 */}
-      <div className="px-5 py-5 border-b border-gray-50">
-        <div className="flex items-center space-x-2.5">
-          <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center shadow-sm">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    <aside className="w-60 bg-white border-l border-gray-100 flex flex-col h-full">
+
+      {/* 项目列表 */}
+      <nav className="flex-1 px-3 py-4 overflow-y-auto">
+        <div className="flex items-center justify-between mb-2 px-2">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">项目列表</p>
+          <button onClick={onAddProject}
+            className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+            title="新建项目">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-          </div>
-          <div>
-            <h1 className="text-sm font-bold text-gray-800">离线办公工具</h1>
-            <p className="text-[10px] text-gray-400">纯本地 · 零网络</p>
-          </div>
+          </button>
         </div>
-      </div>
 
-      {/* 导航菜单 */}
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        <p className="px-2 mb-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
-          功能模块
-        </p>
-        {moduleRegistry.map((mod: ModuleDef) => {
-          const isActive = activeModuleId === mod.id
-          const isDisabled = !mod.enabled
+        {projects.length === 0 && (
+          <p className="text-xs text-gray-400 text-center py-6 px-2">
+            暂无项目<br />
+            <span className="text-gray-300">点击 + 新建项目</span>
+          </p>
+        )}
 
-          return (
-            <button
-              key={mod.id}
-              onClick={() => !isDisabled && onModuleChange(mod.id)}
-              disabled={isDisabled}
-              className={`
-                w-full flex items-center px-3 py-2.5 rounded-xl text-sm transition-all duration-200 group
-                ${isActive
-                  ? 'bg-primary-50 text-primary-700 font-medium'
-                  : isDisabled
-                    ? 'text-gray-300 cursor-not-allowed'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                }
-              `}
-            >
-              <span className={`flex-shrink-0 ${isActive ? 'text-primary-600' : ''}`}>
-                {mod.icon}
-              </span>
-              <span className="ml-3 flex-1 text-left truncate">{mod.name}</span>
-              {mod.badge && (
-                <span className={`
-                  px-1.5 py-0.5 text-[9px] rounded-md font-medium
-                  ${isActive ? 'bg-primary-100 text-primary-600' : 'bg-gray-100 text-gray-400'}
-                `}>
-                  {mod.badge}
-                </span>
-              )}
-              {isActive && (
-                <span className="ml-1 w-1.5 h-1.5 rounded-full bg-primary-500" />
-              )}
-            </button>
-          )
-        })}
+        <div className="space-y-0.5">
+          {projects.map(project => {
+            const isActive = activeProjectId === project.id
+            const isEditing = editingId === project.id
+            const lastModified = project.updatedAt
+              ? new Date(project.updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+              : ''
+
+            return (
+              <div
+                key={project.id}
+                className={`group flex items-center rounded-lg transition-colors ${
+                  isActive ? 'bg-blue-50 ring-1 ring-blue-200' : 'hover:bg-gray-50'
+                }`}
+              >
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    onBlur={handleFinishRename}
+                    onKeyDown={handleKeyDown}
+                    className="flex-1 px-3 py-2 text-sm bg-white border border-blue-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    autoFocus
+                    onClick={e => e.stopPropagation()}
+                  />
+                ) : (
+                  <button
+                    onClick={() => onSelectProject(project.id)}
+                    className="flex-1 flex items-center px-3 py-2 text-left"
+                  >
+                    {/* 项目图标 */}
+                    <svg className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-600' : 'text-gray-400'}`}
+                      fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    <div className="ml-2.5 flex-1 min-w-0">
+                      <p className={`text-sm truncate ${isActive ? 'font-medium text-blue-700' : 'text-gray-700'}`}>
+                        {project.name}
+                      </p>
+                      {lastModified && (
+                        <p className="text-[10px] text-gray-400">{lastModified}</p>
+                      )}
+                    </div>
+                  </button>
+                )}
+
+                {/* 操作按钮（hover显示） */}
+                {!isEditing && (
+                  <div className="flex items-center pr-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleStartRename(project.id, project.name) }}
+                      className="p-1 text-gray-300 hover:text-blue-500 rounded"
+                      title="重命名"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDeleteProject(project.id) }}
+                      className="p-1 text-gray-300 hover:text-red-500 rounded"
+                      title="删除"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </nav>
 
       {/* 底部信息 */}

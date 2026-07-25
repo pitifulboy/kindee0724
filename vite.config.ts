@@ -18,7 +18,7 @@ export default defineConfig({
           build: {
             outDir: path.resolve(__dirname, 'dist-electron/main'),
             rollupOptions: {
-              external: ['electron', 'pdfjs-dist', '@napi-rs/canvas', 'pdf-lib']
+              external: ['electron']
             }
           }
         }

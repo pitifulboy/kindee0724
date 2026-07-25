@@ -1,5 +1,4 @@
 @echo off
-cd /d D:\111111vc
 echo 正在安装项目依赖...
 npm install
 echo 安装完成！

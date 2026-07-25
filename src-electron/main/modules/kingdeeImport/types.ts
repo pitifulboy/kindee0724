@@ -17,6 +17,12 @@ interface FieldMapping {
   financialSeqOffset?: number
 }
 
+interface MatchPair { orderCol: string; auxCol: string }
+interface AuxTableConfig {
+  id: string; name: string; fileName: string; filePath: string
+  matchPairs: MatchPair[]; how: 'left' | 'inner' | 'right'
+}
+interface OrderFile { id: string; path: string; name: string }
 interface MaterialMatchConfig {
   enabled: boolean
   codeTable1Col: string
@@ -45,6 +51,12 @@ interface KingdeeImportPreset {
   fieldMappings: FieldMapping[]
 
   textFormatColumns: string[]
+
+  // ─── Excel 合并配置（合并后的统一预设） ───
+  orderFiles?: OrderFile[]
+  auxTables?: AuxTableConfig[]
+  auxFilePaths?: Record<string, string>
+  orderColumns?: string[]
 }
 
 interface GenerateParams {
@@ -76,6 +88,9 @@ interface PresetListItem {
 export type {
   SourceType,
   FieldMapping,
+  MatchPair,
+  AuxTableConfig,
+  OrderFile,
   MaterialMatchConfig,
   KingdeeImportPreset,
   GenerateParams,

@@ -14,14 +14,9 @@
     "start": "electron ."
   },
   "dependencies": {
-    "@napi-rs/canvas": "^0.1.52",
-    "@reduxjs/toolkit": "^2.2.1",
     "exceljs": "^4.4.0",
-    "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^4.0.379",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-redux": "^9.1.0"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.16",

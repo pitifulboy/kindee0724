@@ -1,10 +1,9 @@
 import { BrowserWindow, ipcMain, dialog, app, shell } from 'electron'
-import { registerPdfConvertHandlers } from '../modules/pdfConvert'
-import { registerImageToPdfHandlers } from '../modules/imageToPdf'
-import { registerPdfMergeHandlers } from '../modules/pdfMerge'
-import { registerPdfSplitHandlers } from '../modules/pdfSplit'
+import * as fs from 'fs'
+import * as path from 'path'
 import { registerExcelMergeHandlers } from '../modules/excelMerge'
 import { registerKingdeeImportHandlers } from '../modules/kingdeeImport'
+import * as projectManager from '../modules/projectManager'
 
 /**
  * 注册所有IPC处理程序
@@ -12,10 +11,6 @@ import { registerKingdeeImportHandlers } from '../modules/kingdeeImport'
  */
 export function registerIpcHandlers(mainWindow: BrowserWindow) {
   // 注册各业务模块的IPC处理程序
-  registerPdfConvertHandlers()
-  registerImageToPdfHandlers(mainWindow)
-  registerPdfMergeHandlers(mainWindow)
-  registerPdfSplitHandlers(mainWindow)
   registerExcelMergeHandlers(mainWindow)
   registerKingdeeImportHandlers(mainWindow)
 
@@ -52,101 +47,71 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
     return { success: true }
   })
 
-  // 读取图片文件（用于前端预览，返回base64）
-  ipcMain.handle('file:readImage', async (_event, filePath: string) => {
+  // 扫描目录中的Excel文件（支持拖拽文件夹）
+  ipcMain.handle('file:listExcelFiles', async (_event, dirPath: string) => {
     try {
-      const fs = require('fs')
-      const buffer = fs.readFileSync(filePath)
-      const ext = filePath.split('.').pop()?.toLowerCase()
-      const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg'
-      return {
-        success: true,
-        data: `data:${mimeType};base64,${buffer.toString('base64')}`
+      const stat = fs.statSync(dirPath)
+      if (stat.isDirectory()) {
+        const files = fs.readdirSync(dirPath)
+          .filter(f => f.endsWith('.xlsx') || f.endsWith('.xls'))
+          .map(f => ({ path: path.join(dirPath, f), name: f }))
+        return { success: true, data: files }
+      } else if (stat.isFile() && (dirPath.endsWith('.xlsx') || dirPath.endsWith('.xls'))) {
+        const name = path.basename(dirPath)
+        return { success: true, data: [{ path: dirPath, name }] }
       }
-    } catch (error: any) {
-      return { success: false, error: error.message }
+      return { success: true, data: [] }
+    } catch {
+      return { success: false, error: '无法读取路径' }
     }
   })
 
-  // 获取文件信息
-  ipcMain.handle('file:getFileInfo', async (_event, filePath: string) => {
-    try {
-      const fs = require('fs')
-      const path = require('path')
-      const stat = fs.statSync(filePath)
-      return {
-        success: true,
-        data: {
-          size: stat.size,
-          name: path.basename(filePath)
-        }
-      }
-    } catch (error: any) {
-      return { success: false, error: error.message }
-    }
+  // ─── 项目管理 ───
+  ipcMain.handle('project:list', async () => {
+    try { return { success: true, data: projectManager.listProjects() } }
+    catch (error: any) { return { success: false, error: error.message } }
   })
 
-  // 递归扫描文件夹中的所有PDF文件
-  ipcMain.handle('file:scanPdfsInDir', async (_event, folderPath: string) => {
+  ipcMain.handle('project:get', async (_event, id: string) => {
     try {
-      const fs = require('fs')
-      const path = require('path')
+      const project = projectManager.getProject(id)
+      if (!project) return { success: false, error: `项目 "${id}" 不存在` }
+      return { success: true, data: project }
+    } catch (error: any) { return { success: false, error: error.message } }
+  })
 
-      // 校验路径是否为目录
-      const rootStat = fs.statSync(folderPath)
-      if (!rootStat.isDirectory()) {
-        return { success: true, data: { files: [] } }
-      }
+  ipcMain.handle('project:save', async (_event, project: projectManager.ProjectItem) => {
+    try {
+      projectManager.saveProject(project)
+      return { success: true }
+    } catch (error: any) { return { success: false, error: error.message } }
+  })
 
-      const results: { path: string; name: string; size: number }[] = []
+  ipcMain.handle('project:delete', async (_event, id: string) => {
+    try {
+      const deleted = projectManager.deleteProject(id)
+      return { success: deleted, error: deleted ? undefined : `项目不存在` }
+    } catch (error: any) { return { success: false, error: error.message } }
+  })
 
-      // 递归遍历目录（防符号链接循环 + 深度限制）
-      const scanDir = (dir: string, depth: number = 0, visited: Set<string> = new Set()) => {
-        if (depth > 20) return  // 递归深度限制
-        const realPath = fs.realpathSync(dir)
-        if (visited.has(realPath)) return  // 防循环
-        visited.add(realPath)
+  ipcMain.handle('project:rename', async (_event, id: string, newName: string) => {
+    try {
+      const renamed = projectManager.renameProject(id, newName)
+      return { success: renamed, error: renamed ? undefined : `项目不存在` }
+    } catch (error: any) { return { success: false, error: error.message } }
+  })
 
-        let entries: string[]
-        try {
-          entries = fs.readdirSync(dir)
-        } catch {
-          return  // 跳过不可访问的目录
-        }
-        for (const entry of entries) {
-          const fullPath = path.join(dir, entry)
-          let stat
-          try {
-            stat = fs.lstatSync(fullPath)
-          } catch {
-            continue  // 跳过无法访问的项
-          }
-          if (stat.isSymbolicLink()) {
-            continue  // 跳过符号链接，防止循环
-          }
-          if (stat.isDirectory()) {
-            scanDir(fullPath, depth + 1, visited)
-          } else if (entry.toLowerCase().endsWith('.pdf')) {
-            results.push({
-              path: fullPath,
-              name: entry,
-              size: stat.size
-            })
-          }
-        }
-      }
+  ipcMain.handle('project:updateStep1', async (_event, id: string, preset: projectManager.Step1Preset) => {
+    try {
+      const ok = projectManager.updateStep1Preset(id, preset)
+      return { success: ok, error: ok ? undefined : `项目不存在` }
+    } catch (error: any) { return { success: false, error: error.message } }
+  })
 
-      scanDir(folderPath)
-
-      // 按文件名排序
-      results.sort((a, b) => a.name.localeCompare(b.name))
-
-      return {
-        success: true,
-        data: { files: results }
-      }
-    } catch (error: any) {
-      return { success: false, error: error.message }
-    }
+  ipcMain.handle('project:updateStep2', async (_event, id: string, preset: projectManager.Step2Preset) => {
+    try {
+      const ok = projectManager.updateStep2Preset(id, preset)
+      return { success: ok, error: ok ? undefined : `项目不存在` }
+    } catch (error: any) { return { success: false, error: error.message } }
   })
 }

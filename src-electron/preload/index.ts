@@ -1,16 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type {
-  PdfConvertOptions,
-  PdfConvertProgress,
-  ImageToPdfOptions,
-  ImageToPdfProgress,
-  PdfMergeOptions,
-  PdfMergeProgress,
-  PdfSplitOptions,
-  PdfSplitProgress,
-  PdfSplitResult,
-  IpcResponse
-} from '../main/ipc/types'
+import type { IpcResponse } from '../main/ipc/types'
 
 /**
  * 暴露给渲染进程的安全API
@@ -32,97 +21,6 @@ const electronAPI = {
 
     openFolder: (): Promise<{ canceled: boolean; filePaths: string[] }> => {
       return ipcRenderer.invoke('dialog:openFolder')
-    }
-  },
-
-  // ─── PDF转图片 ───
-  pdfConvert: {
-    convert: (options: PdfConvertOptions): Promise<IpcResponse<{ outputImages: string[] }>> => {
-      return ipcRenderer.invoke('pdf:convert', options)
-    },
-
-    onProgress: (callback: (progress: PdfConvertProgress) => void): (() => void) => {
-      const handler = (_event: unknown, progress: PdfConvertProgress) => callback(progress)
-      ipcRenderer.on('pdf:convert:progress', handler)
-      return () => {
-        ipcRenderer.removeListener('pdf:convert:progress', handler)
-      }
-    },
-
-    cancel: (): Promise<IpcResponse> => {
-      return ipcRenderer.invoke('pdf:convert:cancel')
-    }
-  },
-
-  // ─── 图片转PDF ───
-  imageToPdf: {
-    convert: (options: ImageToPdfOptions): Promise<IpcResponse<{ outputPath: string }>> => {
-      return ipcRenderer.invoke('image:convertToPdf', options)
-    },
-
-    onProgress: (callback: (progress: ImageToPdfProgress) => void): (() => void) => {
-      const handler = (_event: unknown, progress: ImageToPdfProgress) => callback(progress)
-      ipcRenderer.on('image:convertToPdf:progress', handler)
-      return () => {
-        ipcRenderer.removeListener('image:convertToPdf:progress', handler)
-      }
-    },
-
-    cancel: (): Promise<IpcResponse> => {
-      return ipcRenderer.invoke('image:convertToPdf:cancel')
-    }
-  },
-
-  // ─── PDF合并 ───
-  pdfMerge: {
-    merge: (options: PdfMergeOptions): Promise<IpcResponse<{ outputPath: string; totalPages: number }>> => {
-      return ipcRenderer.invoke('pdf:merge', options)
-    },
-
-    mergeFromImages: (data: {
-      pagesData: { imageData: string; width: number; height: number }[][]
-      outputPath: string
-      fileNames: string[]
-    }): Promise<IpcResponse<{ outputPath: string; totalPages: number }>> => {
-      return ipcRenderer.invoke('pdf:merge:fromImages', data)
-    },
-
-    onProgress: (callback: (progress: PdfMergeProgress) => void): (() => void) => {
-      const handler = (_event: unknown, progress: PdfMergeProgress) => callback(progress)
-      ipcRenderer.on('pdf:merge:progress', handler)
-      return () => {
-        ipcRenderer.removeListener('pdf:merge:progress', handler)
-      }
-    },
-
-    cancel: (): Promise<IpcResponse> => {
-      return ipcRenderer.invoke('pdf:merge:cancel')
-    }
-  },
-
-  // ─── PDF拆分 ───
-  pdfSplit: {
-    split: (options: PdfSplitOptions): Promise<IpcResponse<PdfSplitResult>> => {
-      return ipcRenderer.invoke('pdf:split', options)
-    },
-
-    splitFromImages: (data: {
-      pagesData: { imageData: string; width: number; height: number }[]
-      options: PdfSplitOptions
-    }): Promise<IpcResponse<PdfSplitResult>> => {
-      return ipcRenderer.invoke('pdf:split:fromImages', data)
-    },
-
-    onProgress: (callback: (progress: PdfSplitProgress) => void): (() => void) => {
-      const handler = (_event: unknown, progress: PdfSplitProgress) => callback(progress)
-      ipcRenderer.on('pdf:split:progress', handler)
-      return () => {
-        ipcRenderer.removeListener('pdf:split:progress', handler)
-      }
-    },
-
-    cancel: (): Promise<IpcResponse> => {
-      return ipcRenderer.invoke('pdf:split:cancel')
     }
   },
 
@@ -261,21 +159,6 @@ const electronAPI = {
     }
   },
 
-  // ─── 文件操作 ───
-  file: {
-    readImage: (filePath: string): Promise<IpcResponse<string>> => {
-      return ipcRenderer.invoke('file:readImage', filePath)
-    },
-
-    getFileInfo: (filePath: string): Promise<IpcResponse<{ size: number; name: string }>> => {
-      return ipcRenderer.invoke('file:getFileInfo', filePath)
-    },
-
-    scanPdfsInDir: (folderPath: string): Promise<IpcResponse<{ files: { path: string; name: string; size: number }[] }>> => {
-      return ipcRenderer.invoke('file:scanPdfsInDir', folderPath)
-    }
-  },
-
   // ─── 应用信息 ───
   app: {
     getPath: (name: 'home' | 'appData' | 'userData' | 'temp' | 'desktop' | 'documents'): Promise<string> => {
@@ -283,10 +166,42 @@ const electronAPI = {
     }
   },
 
+  // ─── 文件工具 ───
+  file: {
+    listExcelFiles: (dirPath: string): Promise<IpcResponse<{ path: string; name: string }[]>> => {
+      return ipcRenderer.invoke('file:listExcelFiles', dirPath)
+    }
+  },
+
   // ─── Shell ───
   shell: {
     openPath: (path: string): Promise<IpcResponse> => {
       return ipcRenderer.invoke('shell:openPath', path)
+    }
+  },
+
+  // ─── 项目管理 ───
+  project: {
+    list: (): Promise<IpcResponse<any[]>> => {
+      return ipcRenderer.invoke('project:list')
+    },
+    get: (id: string): Promise<IpcResponse<any>> => {
+      return ipcRenderer.invoke('project:get', id)
+    },
+    save: (project: any): Promise<IpcResponse> => {
+      return ipcRenderer.invoke('project:save', project)
+    },
+    delete: (id: string): Promise<IpcResponse> => {
+      return ipcRenderer.invoke('project:delete', id)
+    },
+    rename: (id: string, newName: string): Promise<IpcResponse> => {
+      return ipcRenderer.invoke('project:rename', id, newName)
+    },
+    updateStep1: (id: string, preset: any): Promise<IpcResponse> => {
+      return ipcRenderer.invoke('project:updateStep1', id, preset)
+    },
+    updateStep2: (id: string, preset: any): Promise<IpcResponse> => {
+      return ipcRenderer.invoke('project:updateStep2', id, preset)
     }
   }
 }
