@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
+import { combinedPage as t } from '../config/appText'
 
 /**
  * SearchableSelect - 可搜索的下拉选择组件
@@ -30,7 +31,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
   value,
   options,
   onChange,
-  placeholder = '— 选择列 —',
+  placeholder = t.selectPlaceholder,
   disabled = false
 }) => {
   const [isOpen, setIsOpen] = useState(false)
@@ -168,7 +169,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="搜索..."
+                placeholder={t.selectSearchPlaceholder}
                 className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-transparent"
               />
             </div>
@@ -178,10 +179,10 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({
           <div className="max-h-48 overflow-y-auto">
             {options.length === 0 ? (
               // 无选项（文件未上传）
-              <div className="px-3 py-4 text-sm text-gray-400 text-center">请先上传文件</div>
+              <div className="px-3 py-4 text-sm text-gray-400 text-center">{t.selectNoOptions}</div>
             ) : filteredOptions.length === 0 ? (
               // 过滤后无匹配
-              <div className="px-3 py-4 text-sm text-gray-400 text-center">无匹配结果</div>
+              <div className="px-3 py-4 text-sm text-gray-400 text-center">{t.selectNoMatch}</div>
             ) : (
               filteredOptions.map((opt, idx) => (
                 <div

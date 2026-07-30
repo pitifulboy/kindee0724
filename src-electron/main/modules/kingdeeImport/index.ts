@@ -1,6 +1,8 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import {
-  generateImportFile, getTable1Columns, getTemplateColumns, cancelGenerate,
+  // generateImportFile,  // 已废弃，旧的一键生成入口
+  getTable1Columns, getTemplateColumns,
+  // cancelGenerate,      // 已废弃，仅旧 generateImportFile 使用
   step1SplitOrders, step2aJoin, step2bDeleteUnmatched, step2cFillData, step2dRestoreStructure, step3MergeTemplates
 } from './service'
 import { listPresets, getPreset, savePreset, deletePreset } from './presetManager'
@@ -62,26 +64,32 @@ export function registerKingdeeImportHandlers(mainWindow: BrowserWindow) {
     }
   })
 
-  ipcMain.handle('kingdee-import:generate', async (_event, params: { config: any }) => {
-    try {
-      const result = await generateImportFile(params.config, (progress) => {
-        mainWindow.webContents.send('kingdee-import:progress', progress)
-      })
-      return { success: true, data: result }
-    } catch (error: any) {
-      return { success: false, error: error.message }
-    }
-  })
-
-  ipcMain.handle('kingdee-import:cancel', async () => {
-    cancelGenerate()
-    return { success: true }
-  })
+  // ═════════════════════════════════════════════════════════════
+  // [已废弃] kingdee-import:generate / cancel
+  // 旧的一键生成入口，已被 step1~step3 逐步执行取代
+  // ═════════════════════════════════════════════════════════════
+  // ipcMain.handle('kingdee-import:generate', async (_event, params: { config: any }) => {
+  //   try {
+  //     const result = await generateImportFile(params.config, (progress) => {
+  //       mainWindow.webContents.send('kingdee-import:progress', progress)
+  //     })
+  //     return { success: true, data: result }
+  //   } catch (error: any) {
+  //     return { success: false, error: error.message }
+  //   }
+  // })
+  //
+  // ipcMain.handle('kingdee-import:cancel', async () => {
+  //   cancelGenerate()
+  //   return { success: true }
+  // })
 
   ipcMain.handle('kingdee-import:step1', async (_event, params: {
     table1Path: string
     groupByColumn: string
     startBillNo: number
+    billNoStep: number
+    billNoBaseField: string
     outputDir: string
   }) => {
     try {
@@ -89,6 +97,8 @@ export function registerKingdeeImportHandlers(mainWindow: BrowserWindow) {
         params.table1Path,
         params.groupByColumn,
         params.startBillNo,
+        params.billNoStep,
+        params.billNoBaseField,
         params.outputDir
       )
       return { success: true, data: result }
@@ -104,6 +114,8 @@ export function registerKingdeeImportHandlers(mainWindow: BrowserWindow) {
     matchFieldTable1: string
     matchFieldTable2: string
     startBillNo: number
+    billNoStep: number
+    billNoBaseField: string
     templateHeaderRowIndex: number
     templateDataStartRowIndex: number
     outputDir: string
@@ -116,6 +128,8 @@ export function registerKingdeeImportHandlers(mainWindow: BrowserWindow) {
         params.matchFieldTable1,
         params.matchFieldTable2,
         params.startBillNo,
+        params.billNoStep,
+        params.billNoBaseField,
         params.templateHeaderRowIndex,
         params.templateDataStartRowIndex,
         params.outputDir
@@ -148,6 +162,7 @@ export function registerKingdeeImportHandlers(mainWindow: BrowserWindow) {
     templateDataStartRowIndex: number
     table2Path: string
     outputDir: string
+    seqConfigs: any[]
   }) => {
     try {
       const result = await step2cFillData(
@@ -159,7 +174,8 @@ export function registerKingdeeImportHandlers(mainWindow: BrowserWindow) {
         params.templateHeaderRowIndex,
         params.templateDataStartRowIndex,
         params.table2Path,
-        params.outputDir
+        params.outputDir,
+        params.seqConfigs
       )
       return { success: true, data: result }
     } catch (error: any) {

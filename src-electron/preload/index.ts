@@ -86,21 +86,24 @@ const electronAPI = {
     getTemplateColumns: (filePath: string, headerRowIndex: number): Promise<IpcResponse<string[]>> => {
       return ipcRenderer.invoke('kingdee-import:getTemplateColumns', filePath, headerRowIndex)
     },
-    generate: (params: { config: any }): Promise<IpcResponse<any>> => {
-      return ipcRenderer.invoke('kingdee-import:generate', params)
-    },
-    onProgress: (callback: (progress: any) => void): (() => void) => {
-      const handler = (_event: unknown, progress: any) => callback(progress)
-      ipcRenderer.on('kingdee-import:progress', handler)
-      return () => { ipcRenderer.removeListener('kingdee-import:progress', handler) }
-    },
-    cancel: (): Promise<IpcResponse> => {
-      return ipcRenderer.invoke('kingdee-import:cancel')
-    },
+    // generate / onProgress / cancel 已废弃（旧 generateImportFile 入口），UI 改用 step1~step3 分步执行
+    // generate: (params: { config: any }): Promise<IpcResponse<any>> => {
+    //   return ipcRenderer.invoke('kingdee-import:generate', params)
+    // },
+    // onProgress: (callback: (progress: any) => void): (() => void) => {
+    //   const handler = (_event: unknown, progress: any) => callback(progress)
+    //   ipcRenderer.on('kingdee-import:progress', handler)
+    //   return () => { ipcRenderer.removeListener('kingdee-import:progress', handler) }
+    // },
+    // cancel: (): Promise<IpcResponse> => {
+    //   return ipcRenderer.invoke('kingdee-import:cancel')
+    // },
     step1: (params: {
       table1Path: string
       groupByColumn: string
       startBillNo: number
+      billNoStep: number
+      billNoBaseField: string
       outputDir: string
     }): Promise<IpcResponse<any>> => {
       return ipcRenderer.invoke('kingdee-import:step1', params)
@@ -112,6 +115,8 @@ const electronAPI = {
       matchFieldTable1: string
       matchFieldTable2: string
       startBillNo: number
+      billNoStep: number
+      billNoBaseField: string
       templateHeaderRowIndex: number
       templateDataStartRowIndex: number
       outputDir: string
@@ -134,6 +139,7 @@ const electronAPI = {
       templateDataStartRowIndex: number
       table2Path: string
       outputDir: string
+      seqConfigs: any[]
     }): Promise<IpcResponse<any>> => {
       return ipcRenderer.invoke('kingdee-import:step2c', params)
     },
@@ -177,7 +183,17 @@ const electronAPI = {
   shell: {
     openPath: (path: string): Promise<IpcResponse> => {
       return ipcRenderer.invoke('shell:openPath', path)
+    },
+    showItemInFolder: (path: string): Promise<IpcResponse> => {
+      return ipcRenderer.invoke('shell:showItemInFolder', path)
     }
+  },
+
+  // ─── 窗口控制 ───
+  window: {
+    minimize: () => ipcRenderer.send('window:minimize'),
+    maximize: () => ipcRenderer.send('window:maximize'),
+    close: () => ipcRenderer.send('window:close'),
   },
 
   // ─── 项目管理 ───
@@ -202,6 +218,15 @@ const electronAPI = {
     },
     updateStep2: (id: string, preset: any): Promise<IpcResponse> => {
       return ipcRenderer.invoke('project:updateStep2', id, preset)
+    },
+    export: (): Promise<IpcResponse> => {
+      return ipcRenderer.invoke('project:export')
+    },
+    import: (): Promise<IpcResponse> => {
+      return ipcRenderer.invoke('project:import')
+    },
+    importFromFile: (filePath: string): Promise<IpcResponse> => {
+      return ipcRenderer.invoke('project:importFromFile', filePath)
     }
   }
 }

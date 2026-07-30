@@ -36,13 +36,16 @@ declare global {
         deletePreset: (name: string) => Promise<IpcResponse>
         getTable1Columns: (filePath: string) => Promise<IpcResponse<string[]>>
         getTemplateColumns: (filePath: string, headerRowIndex: number) => Promise<IpcResponse<string[]>>
-        generate: (params: { config: any }) => Promise<IpcResponse<any>>
-        onProgress: (callback: (progress: any) => void) => () => void
-        cancel: () => Promise<IpcResponse>
+        // generate / onProgress / cancel 已废弃（旧 generateImportFile 入口），UI 改用 step1~step3 分步执行
+        // generate: (params: { config: any }) => Promise<IpcResponse<any>>
+        // onProgress: (callback: (progress: any) => void) => () => void
+        // cancel: () => Promise<IpcResponse>
         step1: (params: {
           table1Path: string
           groupByColumn: string
           startBillNo: number
+          billNoStep: number
+          billNoBaseField: string
           outputDir: string
         }) => Promise<IpcResponse<any>>
         step2a: (params: {
@@ -52,6 +55,8 @@ declare global {
           matchFieldTable1: string
           matchFieldTable2: string
           startBillNo: number
+          billNoStep: number
+          billNoBaseField: string
           templateHeaderRowIndex: number
           templateDataStartRowIndex: number
           outputDir: string
@@ -70,6 +75,7 @@ declare global {
           templateDataStartRowIndex: number
           table2Path: string
           outputDir: string
+          seqConfigs: any[]
         }) => Promise<IpcResponse<any>>
         step2d: (params: {
           inputDir: string
@@ -96,6 +102,12 @@ declare global {
       }
       shell: {
         openPath: (path: string) => Promise<IpcResponse>
+        showItemInFolder: (path: string) => Promise<IpcResponse>
+      }
+      window: {
+        minimize: () => void
+        maximize: () => void
+        close: () => void
       }
       project: {
         list: () => Promise<IpcResponse<any[]>>
@@ -105,6 +117,9 @@ declare global {
         rename: (id: string, newName: string) => Promise<IpcResponse>
         updateStep1: (id: string, preset: any) => Promise<IpcResponse>
         updateStep2: (id: string, preset: any) => Promise<IpcResponse>
+        export: () => Promise<IpcResponse>
+        import: () => Promise<IpcResponse>
+        importFromFile: (filePath: string) => Promise<IpcResponse>
       }
     }
   }

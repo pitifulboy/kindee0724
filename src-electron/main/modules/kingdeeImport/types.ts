@@ -1,20 +1,29 @@
+// billNo/detailSeq/financialSeq/materialCode/materialName 已废弃，改用 seq ID（如 seq-billNo）
+// SourceType 仍保留用于 presetManager 的旧预设读取，新代码不再使用
 type SourceType =
   | 'table1'
   | 'constant'
-  | 'billNo'
-  | 'detailSeq'
-  | 'financialSeq'
+  // | 'billNo' | 'detailSeq' | 'financialSeq'
   | 'date'
-  | 'materialCode'
-  | 'materialName'
+  // | 'materialCode' | 'materialName'
 
 interface FieldMapping {
   id: string
   templateCol: string
-  sourceType: SourceType
+  sourceType: string  // 可以是固定类型(table1/constant/date) 或 seq 配置 ID（如 seq-billNo）
   table1Col?: string
   constantValue?: string
-  financialSeqOffset?: number
+  // financialSeqOffset?: number  // 已废弃，偏移量统一在 seqConfig 中管理
+}
+
+interface SeqConfig {
+  id: string
+  name: string
+  type: 'constant' | 'sequential' | 'fieldBased'
+  constantValue: string
+  start: number
+  step: number
+  baseField: string
 }
 
 interface MatchPair { orderCol: string; auxCol: string }
@@ -23,14 +32,17 @@ interface AuxTableConfig {
   matchPairs: MatchPair[]; how: 'left' | 'inner' | 'right'
 }
 interface OrderFile { id: string; path: string; name: string }
-interface MaterialMatchConfig {
-  enabled: boolean
-  codeTable1Col: string
-  codeTemplateCol: string
-  nameTemplateCol: string
-  nameFallbackTable1Col: string
-}
+// MaterialMatchConfig 已废弃，原物料编码/名称映射已改为通用 fieldMapping
+// interface MaterialMatchConfig {
+//   enabled: boolean
+//   codeTable1Col: string
+//   codeTemplateCol: string
+//   nameTemplateCol: string
+//   nameFallbackTable1Col: string
+// }
 
+// KingdeeImportPreset 为旧预设格式，仅 presetManager 向后兼容读取时使用
+// startBillNo/billNoStep/detailSeqStart/detailSeqStep/financialSeqStep/materialMatch 为新代码中废弃的字段
 interface KingdeeImportPreset {
   name: string
   table1Path: string
@@ -38,7 +50,11 @@ interface KingdeeImportPreset {
   outputDir: string
   outputPrefix: string
 
-  startBillNo: number
+  // startBillNo: number    // 已废弃，改用 seqConfigs
+  // billNoStep: number     // 已废弃
+  // detailSeqStart: number // 已废弃
+  // detailSeqStep: number  // 已废弃
+  // financialSeqStep: number // 已废弃
   date: string
   matchMode: 'fill' | 'strict'
   groupByColumn: string
@@ -46,7 +62,7 @@ interface KingdeeImportPreset {
   templateHeaderRowIndex: number
   templateDataStartRowIndex: number
 
-  materialMatch: MaterialMatchConfig
+  // materialMatch: MaterialMatchConfig  // 已废弃
 
   fieldMappings: FieldMapping[]
 
@@ -59,26 +75,28 @@ interface KingdeeImportPreset {
   orderColumns?: string[]
 }
 
-interface GenerateParams {
-  config: KingdeeImportPreset
-}
+// GenerateParams 仅旧 generateImportFile 使用，已废弃
+// interface GenerateParams {
+//   config: KingdeeImportPreset
+// }
 
-interface KingdeeImportProgress {
-  step: string
-  currentOrder: string
-  currentOrderIndex: number
-  totalOrders: number
-  overallProgress: number
-  status: 'pending' | 'reading' | 'generating' | 'writing' | 'completed' | 'error'
-  message?: string
-}
+// KingdeeImportProgress / KingdeeImportResult 仅旧 generateImportFile 使用，已废弃
+// interface KingdeeImportProgress {
+//   step: string
+//   currentOrder: string
+//   currentOrderIndex: number
+//   totalOrders: number
+//   overallProgress: number
+//   status: 'pending' | 'reading' | 'generating' | 'writing' | 'completed' | 'error'
+//   message?: string
+// }
 
-interface KingdeeImportResult {
-  outputPath: string
-  totalOrders: number
-  totalRows: number
-  skippedRows: number
-}
+// interface KingdeeImportResult {
+//   outputPath: string
+//   totalOrders: number
+//   totalRows: number
+//   skippedRows: number
+// }
 
 interface PresetListItem {
   name: string
@@ -86,15 +104,16 @@ interface PresetListItem {
 }
 
 export type {
-  SourceType,
+  // SourceType,           // 已废弃，保留给 presetManager 旧预设用
   FieldMapping,
+  SeqConfig,
   MatchPair,
   AuxTableConfig,
   OrderFile,
-  MaterialMatchConfig,
+  // MaterialMatchConfig, // 已废弃
   KingdeeImportPreset,
-  GenerateParams,
-  KingdeeImportProgress,
-  KingdeeImportResult,
+  // GenerateParams,      // 已废弃
+  // KingdeeImportProgress,  // 已废弃
+  // KingdeeImportResult,    // 已废弃
   PresetListItem
 }

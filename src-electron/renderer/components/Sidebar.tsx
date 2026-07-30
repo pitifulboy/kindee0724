@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
+import { sidebar as t, app as appText } from '../config/appText'
 
 interface ProjectListItem {
   id: string
@@ -13,14 +14,104 @@ interface SidebarProps {
   onAddProject: () => void
   onRenameProject: (id: string, newName: string) => void
   onDeleteProject: (id: string) => void
+  onCopyProject?: (id: string) => void
+  onImportProjects?: () => void
+  onExportProjects?: () => void
+  onImportFromFile?: (filePath: string) => void
+  isImporting?: boolean
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
   projects, activeProjectId,
-  onSelectProject, onAddProject, onRenameProject, onDeleteProject
+  onSelectProject, onAddProject, onRenameProject, onDeleteProject, onCopyProject,
+  onImportProjects, onExportProjects, onImportFromFile, isImporting
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
+  const [draggingOver, setDraggingOver] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(260)
+  const [isResizing, setIsResizing] = useState(false)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; projectId: string } | null>(null)
+  const dropRef = useRef<HTMLDivElement>(null)
+  const sidebarRef = useRef<HTMLElement>(null)
+  const contextMenuRef = useRef<HTMLDivElement>(null)
+
+  // 右键菜单：点击外部关闭
+  useEffect(() => {
+    if (!contextMenu) return
+    const onAnyClick = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null)
+    }
+    document.addEventListener('mousedown', onAnyClick)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onAnyClick)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [contextMenu])
+
+  const handleContextMenu = (e: React.MouseEvent, projectId: string) => {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, projectId })
+  }
+
+  const handleCopyFromMenu = () => {
+    if (contextMenu && onCopyProject) {
+      onCopyProject(contextMenu.projectId)
+    }
+    setContextMenu(null)
+  }
+
+  // 左侧拖拽调整宽度
+  useEffect(() => {
+    if (!isResizing) return
+    const onMouseMove = (e: MouseEvent) => {
+      const newWidth = Math.max(200, Math.min(520, window.innerWidth - e.clientX))
+      setSidebarWidth(newWidth)
+    }
+    const onMouseUp = () => setIsResizing(false)
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isResizing])
+
+  // 拖拽导入
+  useEffect(() => {
+    const el = dropRef.current
+    if (!el) return
+    const onDragOver = (e: DragEvent) => { e.preventDefault(); setDraggingOver(true) }
+    const onDragLeave = () => setDraggingOver(false)
+    const onDrop = async (e: DragEvent) => {
+      e.preventDefault(); setDraggingOver(false)
+      const files = Array.from(e.dataTransfer?.files || [])
+      if (files.length > 0 && onImportFromFile) {
+        const fp = (files[0] as any).path
+        if (fp && fp.endsWith('.json')) {
+          await onImportFromFile(fp)
+        }
+      }
+    }
+    el.addEventListener('dragover', onDragOver)
+    el.addEventListener('dragleave', onDragLeave)
+    el.addEventListener('drop', onDrop)
+    return () => {
+      el.removeEventListener('dragover', onDragOver)
+      el.removeEventListener('dragleave', onDragLeave)
+      el.removeEventListener('drop', onDrop)
+    }
+  }, [onImportFromFile])
 
   const handleStartRename = (id: string, currentName: string) => {
     setEditingId(id)
@@ -41,15 +132,23 @@ const Sidebar: React.FC<SidebarProps> = ({
   }
 
   return (
-    <aside className="w-60 bg-white border-l border-gray-100 flex flex-col h-full">
+    <aside ref={sidebarRef} className="relative bg-white border-l border-gray-100 flex flex-col h-full flex-shrink-0" style={{ width: sidebarWidth }}>
+
+      {/* 左侧拖拽手柄 */}
+      <div
+        className={`absolute left-0 top-0 bottom-0 w-1 z-20 cursor-col-resize transition-colors ${
+          isResizing ? 'bg-blue-500' : 'hover:bg-blue-400'
+        }`}
+        onMouseDown={() => setIsResizing(true)}
+      />
 
       {/* 项目列表 */}
       <nav className="flex-1 px-3 py-4 overflow-y-auto">
-        <div className="flex items-center justify-between mb-2 px-2">
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">项目列表</p>
+        <div className="flex items-center justify-between mb-3 px-2">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{t.projectListTitle}</p>
           <button onClick={onAddProject}
             className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-            title="新建项目">
+            title={t.newProjectTitle}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
@@ -58,8 +157,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 
         {projects.length === 0 && (
           <p className="text-xs text-gray-400 text-center py-6 px-2">
-            暂无项目<br />
-            <span className="text-gray-300">点击 + 新建项目</span>
+            {t.emptyProjectHint}<br />
+            <span className="text-gray-300">{t.emptyProjectAction}</span>
           </p>
         )}
 
@@ -74,7 +173,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             return (
               <div
                 key={project.id}
-                className={`group flex items-center rounded-lg transition-colors ${
+                className={`group relative flex items-center rounded-lg transition-colors ${
                   isActive ? 'bg-blue-50 ring-1 ring-blue-200' : 'hover:bg-gray-50'
                 }`}
               >
@@ -85,14 +184,15 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onChange={e => setEditName(e.target.value)}
                     onBlur={handleFinishRename}
                     onKeyDown={handleKeyDown}
-                    className="flex-1 px-3 py-2 text-sm bg-white border border-blue-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    className="flex-1 mx-2 my-1.5 px-3 py-2 text-sm bg-white border border-blue-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400"
                     autoFocus
                     onClick={e => e.stopPropagation()}
                   />
                 ) : (
                   <button
                     onClick={() => onSelectProject(project.id)}
-                    className="flex-1 flex items-center px-3 py-2 text-left"
+                    onContextMenu={(e) => handleContextMenu(e, project.id)}
+                    className="flex-1 flex items-center px-3 py-2.5 text-left min-w-0"
                   >
                     {/* 项目图标 */}
                     <svg className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-600' : 'text-gray-400'}`}
@@ -101,7 +201,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                     </svg>
                     <div className="ml-2.5 flex-1 min-w-0">
-                      <p className={`text-sm truncate ${isActive ? 'font-medium text-blue-700' : 'text-gray-700'}`}>
+                      <p className={`text-sm truncate ${isActive ? 'font-medium text-blue-700' : 'text-gray-700'}`} title={project.name}>
                         {project.name}
                       </p>
                       {lastModified && (
@@ -111,13 +211,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </button>
                 )}
 
-                {/* 操作按钮（hover显示） */}
+                {/* 操作按钮（hover显示）- 固定在右侧并预留给宽 */}
                 {!isEditing && (
-                  <div className="flex items-center pr-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center pr-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                     <button
                       onClick={(e) => { e.stopPropagation(); handleStartRename(project.id, project.name) }}
-                      className="p-1 text-gray-300 hover:text-blue-500 rounded"
-                      title="重命名"
+                      className="p-1.5 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-md"
+                      title={t.renameTitle}
                     >
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -126,8 +226,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); onDeleteProject(project.id) }}
-                      className="p-1 text-gray-300 hover:text-red-500 rounded"
-                      title="删除"
+                      className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-md"
+                      title={t.deleteTitle}
                     >
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -142,16 +242,61 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </nav>
 
-      {/* 底部信息 */}
-      <div className="px-4 py-3 border-t border-gray-50">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-1.5">
-            <div className="w-2 h-2 rounded-full bg-green-400" />
-            <span className="text-[11px] text-gray-400">本地运行中</span>
+      {/* 底部 — 导入 / 导出 */}
+      <div ref={dropRef} className={`px-3 py-3 border-t border-gray-50 space-y-1.5 transition-colors ${draggingOver ? 'bg-blue-50 border-blue-300' : ''}`}>
+        {draggingOver && (
+          <div className="text-[11px] text-blue-600 font-medium text-center mb-1">
+            {t.importFromFileHint}
           </div>
-          <span className="text-[11px] text-gray-300">v2.7.2</span>
+        )}
+        <div className="flex items-center space-x-1.5">
+          <div className="w-2 h-2 rounded-full bg-green-400" />
+          <span className="text-[11px] text-gray-400">{appText.statusRunning}</span>
+          <div className="flex-1" />
+          <span className="text-[11px] text-gray-300">{appText.version}</span>
+        </div>
+        <div className="flex space-x-1">
+          <button
+            onClick={onImportProjects}
+            disabled={isImporting}
+            className="flex-1 flex items-center justify-center px-2 py-1.5 text-[11px] text-gray-500 border border-gray-200 rounded hover:bg-gray-50 hover:text-blue-600 disabled:opacity-50 transition-colors"
+            title={t.importPresetTitle}>
+            <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            {t.importBtn}
+          </button>
+          <button
+            onClick={onExportProjects}
+            disabled={isImporting}
+            className="flex-1 flex items-center justify-center px-2 py-1.5 text-[11px] text-gray-500 border border-gray-200 rounded hover:bg-gray-50 hover:text-blue-600 disabled:opacity-50 transition-colors"
+            title={t.exportPresetTitle}>
+            <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            {t.exportBtn}
+          </button>
         </div>
       </div>
+
+      {/* 右键菜单 */}
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="fixed z-50 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            onClick={handleCopyFromMenu}
+            className="w-full flex items-center px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors text-left"
+          >
+            <svg className="w-4 h-4 mr-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            {t.copyProject}
+          </button>
+        </div>
+      )}
     </aside>
   )
 }

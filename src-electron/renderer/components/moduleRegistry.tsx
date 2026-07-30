@@ -1,4 +1,5 @@
 import React from 'react'
+import { moduleRegistry as t } from '../config/appText'
 
 /**
  * 模块定义接口
@@ -33,9 +34,9 @@ const ExcelIcon = (
 export const moduleRegistry: ModuleDef[] = [
   {
     id: 'excel-kingdee',
-    name: 'Excel合并→金蝶导入',
+    name: t.excelKingdee.name,
     icon: ExcelIcon,
-    description: 'Excel批量合并后自动转为金蝶导入数据源',
+    description: t.excelKingdee.description,
     enabled: true,
   },
 ]

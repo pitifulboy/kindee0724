@@ -16,6 +16,21 @@ import type {
 let isCancelled = false
 
 /**
+ * 写入 Excel 工作簿到目标路径（先写 temp 再拷贝，避免安全软件拦截）
+ */
+async function writeWorkbookSafe(wb: ExcelJS.Workbook, targetPath: string): Promise<void> {
+  const tmpDir = path.join(require('electron').app.getPath('temp'), 'excel-merge-write-cache')
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
+  const tmpPath = path.join(tmpDir, `__tmp_${Date.now()}_${Math.random().toString(36).slice(2)}.xlsx`)
+  try {
+    await wb.xlsx.writeFile(tmpPath)
+    fs.copyFileSync(tmpPath, targetPath)
+  } finally {
+    try { fs.unlinkSync(tmpPath) } catch { /* ignore */ }
+  }
+}
+
+/**
  * 读取 Excel 文件为行数据数组
  * 返回：{ columns: string[], rows: Record<string, any>[] }
  */
@@ -356,7 +371,7 @@ export async function mergeExcelData(
   }
   headerRow.alignment = { horizontal: 'center', vertical: 'middle' }
 
-  await wb.xlsx.writeFile(outputPath)
+  await writeWorkbookSafe(wb, outputPath)
 
   onProgress({
     step: '完成',

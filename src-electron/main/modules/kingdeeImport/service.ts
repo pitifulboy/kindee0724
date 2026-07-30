@@ -2,13 +2,37 @@ import * as fs from 'fs'
 import * as path from 'path'
 import ExcelJS from 'exceljs'
 import type {
-  KingdeeImportPreset,
-  KingdeeImportProgress,
-  KingdeeImportResult,
-  FieldMapping
+  // KingdeeImportPreset,  // 旧预设类型，仅旧 generateImportFile 使用（已废弃）
+  // KingdeeImportProgress,  // 旧进度类型（已废弃）
+  // KingdeeImportResult,    // 旧结果类型（已废弃）
+  FieldMapping,
+  SeqConfig
 } from './types'
 
-let isCancelled = false
+// isCancelled / cancelGenerate 仅旧 generateImportFile 使用，已废弃
+// let isCancelled = false
+
+/**
+ * 写入 Excel 工作簿到目标路径
+ *
+ * exceljs 在写入 .xlsx 时会在**同目录**创建临时文件，
+ * 部分安全软件（如 360）会对桌面等目录的文件创建操作做深度检查，
+ * 导致 EPERM 错误。
+ *
+ * 解决方案：写入 temp 目录 → 拷贝到目标目录，两步分离。
+ */
+async function writeWorkbookSafe(wb: ExcelJS.Workbook, targetPath: string): Promise<void> {
+  const tmpDir = path.join(require('electron').app.getPath('temp'), 'kingdee-write-cache')
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
+
+  const tmpPath = path.join(tmpDir, `__tmp_${Date.now()}_${Math.random().toString(36).slice(2)}.xlsx`)
+  try {
+    await wb.xlsx.writeFile(tmpPath)
+    fs.copyFileSync(tmpPath, targetPath)
+  } finally {
+    try { fs.unlinkSync(tmpPath) } catch { /* ignore */ }
+  }
+}
 
 function clean(val: any): string {
   if (val === null || val === undefined) return ''
@@ -216,6 +240,8 @@ export async function step1SplitOrders(
   table1Path: string,
   groupByColumn: string,
   startBillNo: number,
+  billNoStep: number,
+  billNoBaseField: string,
   outputDir: string
 ): Promise<Step1Output> {
   const { columns: table1Cols, rows: table1Rows } = await readTable1(table1Path)
@@ -227,13 +253,24 @@ export async function step1SplitOrders(
     groups.get(key)!.push(row)
   }
 
+  // 按 billNoBaseField 排序分组（使编号顺序可预测）
+  const groupEntries = [...groups.entries()]
+  if (billNoBaseField) {
+    groupEntries.sort((a, b) => {
+      const va = clean(a[1][0]?.[billNoBaseField] ?? '')
+      const vb = clean(b[1][0]?.[billNoBaseField] ?? '')
+      return va.localeCompare(vb)
+    })
+  }
+
   const orderFiles: { orderKey: string; billNo: number; filePath: string; rowCount: number }[] = []
   let currentBillNo = startBillNo
 
   const { dir: stepDir, fallbackUsed: dirFallback } = await resolveWritableDir(outputDir, '步骤1_订单拆分')
 
-  for (const [orderKey, items] of groups) {
-    const billNo = currentBillNo++
+  for (const [orderKey, items] of groupEntries) {
+    const billNo = currentBillNo
+    currentBillNo += billNoStep
     const orderFile = path.join(stepDir, `订单_${orderKey}_${billNo}.xlsx`)
     const wb = new ExcelJS.Workbook()
     const ws = wb.addWorksheet('订单数据')
@@ -244,7 +281,7 @@ export async function step1SplitOrders(
     }
     ws.addRow(['', '', '', `单号: ${billNo}`])
 
-    await wb.xlsx.writeFile(orderFile)
+    await writeWorkbookSafe(wb, orderFile)
     orderFiles.push({ orderKey, billNo, filePath: orderFile, rowCount: items.length })
   }
 
@@ -256,7 +293,7 @@ export async function step1SplitOrders(
     ws.addRow([order.orderKey, order.billNo, order.rowCount, order.filePath])
   }
 
-  await wb.xlsx.writeFile(summaryFile)
+  await writeWorkbookSafe(wb, summaryFile)
 
   const fallbackWarning1 = dirFallback ? `步骤1输出目录不可写入，已回退至: ${stepDir}` : undefined
 
@@ -287,6 +324,8 @@ export async function step2aJoin(
   matchFieldTable1: string,
   matchFieldTable2: string,
   startBillNo: number,
+  billNoStep: number,
+  billNoBaseField: string,
   templateHeaderRowIndex: number,
   templateDataStartRowIndex: number,
   outputDir: string
@@ -331,6 +370,19 @@ export async function step2aJoin(
     groupDataMap.set(orderKey, dataMap)
   }
 
+  // 按 billNoBaseField 排序分组
+  const sortedGroupEntries = [...groupDataMap.entries()]
+  if (billNoBaseField) {
+    const dataItems = [...groups.entries()]
+    sortedGroupEntries.sort((a, b) => {
+      const ga = dataItems.find(e => e[0] === a[0])
+      const gb = dataItems.find(e => e[0] === b[0])
+      const va = clean(ga?.[1]?.[0]?.[billNoBaseField] ?? '')
+      const vb = clean(gb?.[1]?.[0]?.[billNoBaseField] ?? '')
+      return va.localeCompare(vb)
+    })
+  }
+
   const dataCols = table1Rows.length > 0 ? Object.keys(table1Rows[0]) : []
   const headers = [...table2Cols, ...dataCols, '_orderKey', '_billNo', '_matchStatus']
 
@@ -339,8 +391,9 @@ export async function step2aJoin(
   let currentBillNo = startBillNo
   const rows: any[][] = []
 
-  for (const [orderKey, dataMap] of groupDataMap) {
-    const billNo = currentBillNo++
+  for (const [orderKey, dataMap] of sortedGroupEntries) {
+    const billNo = currentBillNo
+    currentBillNo += billNoStep
     // Template is the LEFT table: iterate over template rows
     for (const tmplRow of templateRows) {
       const matchValue = strictKey(tmplRow[matchFieldTable2])
@@ -396,7 +449,7 @@ export async function step2aJoin(
   for (const row of rows) {
     ws.addRow(row)
   }
-  await wb.xlsx.writeFile(outputPath)
+  await writeWorkbookSafe(wb, outputPath)
 
   return { outputPath, totalRows: rows.length, matchedCount, unmatchedCount, fallbackWarning: fallbackUsed ? `步骤2a输出目录不可写入，已回退至: ${stepDir}` : undefined }
 }
@@ -455,7 +508,7 @@ export async function step2bDeleteUnmatched(
   for (const row of keptRows) {
     outWs.addRow(row)
   }
-  await outWb.xlsx.writeFile(outputPath)
+  await writeWorkbookSafe(outWb, outputPath)
 
   return { outputPath, totalRows: keptRows.length, matchedRows, unmatchedDeleted, fallbackWarning: fallbackUsed ? `步骤2b输出目录不可写入，已回退至: ${stepDir}` : undefined }
 }
@@ -475,11 +528,23 @@ export async function step2cFillData(
   templateHeaderRowIndex: number,
   templateDataStartRowIndex: number,
   table2Path: string,
-  outputDir: string
+  outputDir: string,
+  seqConfigs: SeqConfig[] = []
 ): Promise<Step2cOutput> {
   const inputFile = path.join(inputDir, '已匹配行.xlsx')
   if (!fs.existsSync(inputFile)) {
     throw new Error(`未找到步骤2b的输出文件: ${inputFile}，请先执行步骤2b`)
+  }
+
+  // 构建 seq 配置索引
+  const seqConfigMap = new Map(seqConfigs.map(c => [c.id, c]))
+
+  // 校验：所有 fieldBased 类型且被 fieldMappings 引用的配置必须设置 baseField
+  for (const mapping of fieldMappings) {
+    const cfg = seqConfigMap.get(mapping.sourceType)
+    if (cfg && cfg.type === 'fieldBased' && !cfg.baseField) {
+      throw new Error(`序号自增"${cfg.name}"配置：请选择基于字段`)
+    }
   }
 
   const { colMap, resolveCol, columns: table2Cols } = await readTemplate(
@@ -487,10 +552,10 @@ export async function step2cFillData(
   )
 
   const templateDataStart = templateDataStartRowIndex - 1
-  const { allRows } = await readTemplate(table2Path, templateHeaderRowIndex, templateDataStartRowIndex)
+  const { allRows: templateAllRows } = await readTemplate(table2Path, templateHeaderRowIndex, templateDataStartRowIndex)
   const templateRows: Record<string, any>[] = []
-  for (let i = templateDataStart; i < allRows.length; i++) {
-    const row = allRows[i]
+  for (let i = templateDataStart; i < templateAllRows.length; i++) {
+    const row = templateAllRows[i]
     const rowData: Record<string, any> = {}
     Object.keys(colMap).forEach(col => {
       rowData[col] = row[colMap[col]] ?? ''
@@ -514,61 +579,119 @@ export async function step2cFillData(
   })
 
   const dataColCount = table2Cols.length
-  let seq = 1
   let rowCount = 0
 
+  // 收集所有 fieldBased 的 baseField 列索引（用于排序和分组）
+  const fieldBasedSortFields: { idx: number }[] = []
+  for (const cfg of seqConfigs) {
+    if (cfg.type === 'fieldBased' && cfg.baseField) {
+      const idx = headers.indexOf(cfg.baseField)
+      if (idx >= 0) fieldBasedSortFields.push({ idx })
+    }
+  }
+
+  // 预读取所有行
+  const allRows: { rowNum: number; data: any[] }[] = []
   for (let r = 2; r <= ws.rowCount; r++) {
     const rowData: any[] = []
     ws.getRow(r).eachCell((cell, colNum) => {
       rowData[colNum - 1] = getCellValue(cell)
     })
+    allRows.push({ rowNum: r, data: rowData })
+  }
 
+  // 按所有 fieldBased 的 baseField 排序（确保同组行相邻）
+  if (fieldBasedSortFields.length > 0) {
+    allRows.sort((a, b) => {
+      for (const sf of fieldBasedSortFields) {
+        const va = clean(a.data[sf.idx] ?? '')
+        const vb = clean(b.data[sf.idx] ?? '')
+        const cmp = va.localeCompare(vb)
+        if (cmp !== 0) return cmp
+      }
+      return 0
+    })
+  }
+
+  // 每个 seq 配置的计数器（用于 sequential / fieldBased 类型）
+  const seqCounters = new Map<string, { value: number; prevBaseVal: string }>()
+
+  for (const { rowNum: r, data: rowData } of allRows) {
     const billNo = rowData[headers.indexOf('_billNo')] ?? 0
-    const orderKey = rowData[headers.indexOf('_orderKey')] ?? ''
 
     for (const mapping of fieldMappings) {
       const colIdx = resolveCol(mapping.templateCol)
       if (colIdx === undefined) continue
 
       let value: any = ''
-      switch (mapping.sourceType) {
-        case 'billNo':
-          value = billNo
-          break
-        case 'detailSeq':
-          value = seq
-          break
-        case 'financialSeq':
-          value = billNo + (mapping.financialSeqOffset || 1)
-          break
-        case 'date':
-          value = date
-          break
-        case 'table1':
-          value = rowData[dataColCount + (headers.indexOf(mapping.table1Col || '') - dataColCount)] ?? ''
-          break
-        case 'constant':
-          value = mapping.constantValue || ''
-          break
-        case 'materialCode':
-          const dataIdx = headers.indexOf(mapping.table1Col || '')
-          if (dataIdx >= dataColCount) {
-            value = rowData[dataIdx] ?? ''
-          }
-          break
-        case 'materialName':
-          const codeIdx = headers.indexOf(mapping.table1Col || '')
-          const matCode = codeIdx >= 0 ? clean(rowData[codeIdx]) : ''
-          const tmplRow = templateMap.get(matCode)
-          value = tmplRow?.[matchFieldTable2.replace('编码', '名称')] ?? ''
-          break
+
+      // ★ 核心：动态从 seqConfigs 查找匹配的序列配置
+      const seqCfg = seqConfigMap.get(mapping.sourceType)
+      if (seqCfg) {
+        switch (seqCfg.type) {
+          case 'constant':
+            value = seqCfg.constantValue || ''
+            break
+          case 'sequential':
+            if (!seqCounters.has(seqCfg.id)) {
+              seqCounters.set(seqCfg.id, { value: seqCfg.start, prevBaseVal: '' })
+            }
+            value = seqCounters.get(seqCfg.id)!.value
+            seqCounters.get(seqCfg.id)!.value += seqCfg.step
+            break
+          case 'fieldBased':
+            if (!seqCounters.has(seqCfg.id)) {
+              seqCounters.set(seqCfg.id, { value: seqCfg.start, prevBaseVal: '' })
+            }
+            const counter = seqCounters.get(seqCfg.id)!
+            if (seqCfg.baseField) {
+              const bfIdx = headers.indexOf(seqCfg.baseField)
+              if (bfIdx >= 0) {
+                const currentBaseVal = clean(rowData[bfIdx] ?? '')
+                // 与上一行不是同一字段值 → 递增步长（产生新的序列号）
+                if (counter.prevBaseVal !== '' && currentBaseVal !== counter.prevBaseVal) {
+                  counter.value += seqCfg.step
+                }
+                counter.prevBaseVal = currentBaseVal
+              }
+            }
+            value = counter.value
+            // 不递增：同组内（字段重复）序号也重复
+            break
+        }
+      } else {
+        // 后备：非序列类型的标准取值（date、table1、constant 仍活跃使用）
+        switch (mapping.sourceType) {
+          case 'date':
+            value = date
+            break
+          case 'table1':
+            value = rowData[dataColCount + (headers.indexOf(mapping.table1Col || '') - dataColCount)] ?? ''
+            break
+          case 'constant':
+            value = mapping.constantValue || ''
+            break
+          // ⚠ materialCode / materialName 仅用于读取极旧的预设文件（已废弃的映射来源类型）
+          // 正常情况下新创建的映射不会用到此分支，保留仅确保旧预设兼容
+          case 'materialCode':
+            const dataIdx = headers.indexOf(mapping.table1Col || '')
+            if (dataIdx >= dataColCount) {
+              value = rowData[dataIdx] ?? ''
+            }
+            break
+          case 'materialName':
+            const codeIdx = headers.indexOf(mapping.table1Col || '')
+            const matCode = codeIdx >= 0 ? clean(rowData[codeIdx]) : ''
+            const tmplRow = templateMap.get(matCode)
+            value = tmplRow?.[matchFieldTable2.replace('编码', '名称')] ?? ''
+            break
+        }
       }
 
       if (colIdx < dataColCount) {
         rowData[colIdx] = value
       }
     }
-    seq++
     rowCount++
 
     const writeRow = ws.getRow(r)
@@ -580,7 +703,7 @@ export async function step2cFillData(
 
   const { dir: stepDir, fallbackUsed } = await resolveWritableDir(outputDir, '步骤2c_填充数据')
   const outputPath = path.join(stepDir, '已填充数据.xlsx')
-  await wb.xlsx.writeFile(outputPath)
+  await writeWorkbookSafe(wb, outputPath)
 
   return { outputPath, totalRows: rowCount, fallbackWarning: fallbackUsed ? `步骤2c输出目录不可写入，已回退至: ${stepDir}` : undefined }
 }
@@ -658,7 +781,7 @@ export async function step2dRestoreStructure(
     for (const row of group.rows) {
       outWs.addRow(row)
     }
-    await outWb.xlsx.writeFile(orderFile)
+    await writeWorkbookSafe(outWb, orderFile)
     filledTemplateFiles.push({ orderKey, billNo: group.billNo, filePath: orderFile, rowCount: group.rows.length })
     totalRows += group.rows.length
   }
@@ -751,7 +874,7 @@ export async function step3MergeTemplates(
 
   const fallbackWarning3 = dirFallback ? `步骤3输出目录不可写入，已回退至: ${finalDir}` : undefined
 
-  await wbOut.xlsx.writeFile(finalOutputPath)
+  await writeWorkbookSafe(wbOut, finalOutputPath)
 
   return {
     outputPath: finalOutputPath,
@@ -761,321 +884,29 @@ export async function step3MergeTemplates(
   }
 }
 
-export async function generateImportFile(
-  config: KingdeeImportPreset,
-  onProgress: (progress: KingdeeImportProgress) => void
-): Promise<KingdeeImportResult> {
-  isCancelled = false
-
-  if (!fs.existsSync(config.table1Path)) {
-    throw new Error(`数据表文件不存在: ${config.table1Path}`)
-  }
-  if (!fs.existsSync(config.table2Path)) {
-    throw new Error(`模板表文件不存在: ${config.table2Path}`)
-  }
-
-  onProgress({
-    step: '初始化', currentOrder: '', currentOrderIndex: 0,
-    totalOrders: 0, overallProgress: 0, status: 'pending',
-    message: '准备开始生成...'
-  })
-
-  onProgress({
-    step: '步骤1: 读取数据表', currentOrder: '', currentOrderIndex: 0,
-    totalOrders: 0, overallProgress: 5, status: 'reading',
-    message: '正在读取数据表...'
-  })
-  const { rows: table1Rows } = await readTable1(config.table1Path)
-  onProgress({
-    step: '步骤1: 读取数据表', currentOrder: '', currentOrderIndex: 0,
-    totalOrders: 0, overallProgress: 10, status: 'reading',
-    message: `数据表读取完成：${table1Rows.length} 行数据`
-  })
-  if (table1Rows.length > 0) {
-    onProgress({
-      step: '步骤1: 读取数据表', currentOrder: '', currentOrderIndex: 0,
-      totalOrders: 0, overallProgress: 12, status: 'reading',
-      message: `数据表列：${Object.keys(table1Rows[0]).join('、')}`
-    })
-  }
-  if (isCancelled) throw new Error('已取消')
-
-  onProgress({
-    step: '步骤1: 生成单号', currentOrder: '', currentOrderIndex: 0,
-    totalOrders: 0, overallProgress: 15, status: 'generating',
-    message: '步骤1：根据订单表的指定字段，按起始数生成新的单号...'
-  })
-  const groups = new Map<string, Record<string, any>[]>()
-  for (const row of table1Rows) {
-    const key = clean(row[config.groupByColumn])
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(row)
-  }
-  const totalOrders = groups.size
-  onProgress({
-    step: '步骤1: 生成单号', currentOrder: '', currentOrderIndex: 0,
-    totalOrders, overallProgress: 20, status: 'generating',
-    message: `步骤1完成：共识别 ${totalOrders} 个订单，起始单号 ${config.startBillNo}`
-  })
-
-  const billNumbers = new Map<string, number>()
-  let currentBillNo = config.startBillNo
-  for (const [key] of groups) {
-    billNumbers.set(key, currentBillNo++)
-  }
-
-  const billNumList = Array.from(billNumbers.entries()).map(
-    ([key, num]) => `${key} → ${num}`
-  )
-  onProgress({
-    step: '步骤1: 生成单号', currentOrder: '', currentOrderIndex: 0,
-    totalOrders, overallProgress: 22, status: 'generating',
-    message: `单号映射：${billNumList.join('; ')}`
-  })
-  if (isCancelled) throw new Error('已取消')
-
-  onProgress({
-    step: '步骤2: 读取模板表', currentOrder: '', currentOrderIndex: 0,
-    totalOrders, overallProgress: 25, status: 'reading',
-    message: '步骤2：读取模板表（含参照数据）...'
-  })
-  const { colMap, resolveCol, sampleRow, headerRows } = await readTemplate(
-    config.table2Path,
-    config.templateHeaderRowIndex,
-    config.templateDataStartRowIndex
-  )
-  onProgress({
-    step: '步骤2: 读取模板表', currentOrder: '', currentOrderIndex: 0,
-    totalOrders, overallProgress: 30, status: 'reading',
-    message: `模板表读取完成：${Object.keys(colMap).length} 个列名`
-  })
-  onProgress({
-    step: '步骤2: 读取模板表', currentOrder: '', currentOrderIndex: 0,
-    totalOrders, overallProgress: 32, status: 'reading',
-    message: `模板列：${Object.keys(colMap).join('、')}`
-  })
-  if (isCancelled) throw new Error('已取消')
-
-  onProgress({
-    step: '步骤2: 匹配订单', currentOrder: '', currentOrderIndex: 0,
-    totalOrders, overallProgress: 35, status: 'generating',
-    message: '步骤2：遍历订单表，每个订单用指定字段匹配模板表...'
-  })
-  const matchedOrders: { orderKey: string; billNo: number; items: Record<string, any>[] }[] = []
-  for (const [orderKey, items] of groups) {
-    const billNo = billNumbers.get(orderKey) || 0
-    matchedOrders.push({ orderKey, billNo, items })
-  }
-  onProgress({
-    step: '步骤2: 匹配订单', currentOrder: '', currentOrderIndex: 0,
-    totalOrders, overallProgress: 40, status: 'generating',
-    message: `步骤2完成：${matchedOrders.length} 个订单匹配成功`
-  })
-  for (const order of matchedOrders) {
-    onProgress({
-      step: '步骤2: 匹配订单',
-      currentOrder: order.orderKey,
-      currentOrderIndex: 0,
-      totalOrders,
-      overallProgress: 40,
-      status: 'generating',
-      message: `匹配订单 ${order.orderKey}: ${order.items.length} 条明细，单号 ${order.billNo}`
-    })
-  }
-  if (isCancelled) throw new Error('已取消')
-
-  onProgress({
-    step: '步骤3: 填充模板', currentOrder: '', currentOrderIndex: 0,
-    totalOrders, overallProgress: 45, status: 'generating',
-    message: '步骤3：按映射关系，填充模板表，生成对应订单的模板...'
-  })
-
-  const filledTemplates: any[][][] = []
-  let totalFilledRows = 0
-  let detailSeq = 1
-
-  const maxColIdx = Object.values(colMap).reduce((max, idx) => Math.max(max, idx), -1)
-  const fallbackRow: any[] = new Array(maxColIdx + 1).fill('')
-
-  for (const order of matchedOrders) {
-    const orderRows: any[][] = []
-
-    for (const item of order.items) {
-      const baseRow = [...(sampleRow.length > 0 ? sampleRow : fallbackRow)]
-      const finalRow = [...baseRow]
-
-      for (const mapping of config.fieldMappings) {
-        const colIdx = resolveCol(mapping.templateCol)
-        if (colIdx === undefined) continue
-
-        let value: any = ''
-
-        switch (mapping.sourceType) {
-          case 'billNo':
-            value = order.billNo
-            break
-          case 'detailSeq':
-            value = detailSeq
-            break
-          case 'financialSeq':
-            value = order.billNo + (mapping.financialSeqOffset || 1)
-            break
-          case 'date':
-            value = config.date
-            break
-          case 'table1':
-            value = item[mapping.table1Col || ''] ?? ''
-            break
-          case 'constant':
-            value = mapping.constantValue || ''
-            break
-          case 'materialCode':
-            value = item[mapping.table1Col || ''] ?? ''
-            break
-          case 'materialName':
-            value = ''
-            break
-        }
-
-        finalRow[colIdx] = value
-      }
-
-      orderRows.push(finalRow)
-      detailSeq++
-      totalFilledRows++
-    }
-
-    filledTemplates.push(orderRows)
-
-    onProgress({
-      step: '步骤3: 填充模板',
-      currentOrder: order.orderKey,
-      currentOrderIndex: currentBillNo - config.startBillNo,
-      totalOrders,
-      overallProgress: 50 + Math.round((currentBillNo - config.startBillNo) / totalOrders * 25),
-      status: 'generating',
-      message: `订单 ${order.orderKey}: 填充 ${orderRows.length} 条，单号 ${order.billNo}`
-    })
-  }
-
-  onProgress({
-    step: '步骤3: 填充模板', currentOrder: '', currentOrderIndex: 0,
-    totalOrders, overallProgress: 75, status: 'generating',
-    message: `步骤3完成：共填充 ${totalFilledRows} 条数据到 ${filledTemplates.length} 个订单模板`
-  })
-  if (isCancelled) throw new Error('已取消')
-
-  onProgress({
-    step: '步骤4: 合并模板', currentOrder: '', currentOrderIndex: 0,
-    totalOrders, overallProgress: 85, status: 'writing',
-    message: '步骤4：合并所有订单的模板...'
-  })
-
-  const wbOut = new ExcelJS.Workbook()
-  await wbOut.xlsx.readFile(config.table2Path)
-  const wsOut = wbOut.worksheets[0]
-
-  wsOut.spliceRows(1, wsOut.rowCount)
-
-  for (const headerRow of headerRows) {
-    wsOut.addRow(headerRow)
-  }
-
-  let totalOut = 0
-  for (const orderRows of filledTemplates) {
-    for (const rowData of orderRows) {
-      wsOut.addRow(rowData)
-      totalOut++
-    }
-  }
-
-  if (config.textFormatColumns && config.textFormatColumns.length > 0) {
-    const maxRow = wsOut.rowCount
-    for (const colName of config.textFormatColumns) {
-      const colIdx = colMap[colName]
-      if (colIdx !== undefined) {
-        for (let r = 1; r <= maxRow; r++) {
-          const cell = wsOut.getRow(r).getCell(colIdx + 1)
-          cell.numFmt = '@'
-          if (cell.value !== null && cell.value !== undefined && cell.value !== '') {
-            let val = cell.value
-            if (typeof val === 'number') {
-              val = val === Math.floor(val) ? String(Math.floor(val)) : String(val)
-            } else if (typeof val !== 'string') {
-              val = String(val)
-            }
-            cell.value = val
-          }
-        }
-      }
-    }
-  }
-
-  const os = require('os')
-  const timeTag = new Date().toISOString().replace(/[:.]/g, '').replace('T', '_').slice(0, 15)
-  const fileName = `${config.outputPrefix}_${timeTag}.xlsx`
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kingdee-'))
-  const tmpPath = path.join(tmpDir, fileName)
-  await wbOut.xlsx.writeFile(tmpPath)
-
-  const tryPaths: string[] = [
-    path.join(config.outputDir, fileName),
-  ]
-  try {
-    const { app } = require('electron')
-    tryPaths.push(path.join(app.getPath('documents'), fileName))
-    tryPaths.push(path.join(app.getPath('desktop'), fileName))
-    tryPaths.push(path.join(app.getPath('temp'), fileName))
-  } catch {}
-
-  let finalOutputPath: string | null = null
-  let lastError: Error | null = null
-
-  for (const tryPath of tryPaths) {
-    try {
-      const tryDir = path.dirname(tryPath)
-      if (!fs.existsSync(tryDir)) {
-        fs.mkdirSync(tryDir, { recursive: true })
-      }
-      fs.copyFileSync(tmpPath, tryPath)
-      finalOutputPath = tryPath
-      break
-    } catch (e: any) {
-      lastError = e
-    }
-  }
-
-  try { fs.unlinkSync(tmpPath) } catch {}
-  try { fs.rmdirSync(tmpDir) } catch {}
-
-  if (!finalOutputPath) {
-    throw new Error(
-      `文件保存失败：所有目标路径均无法写入（${lastError?.message || '未知错误'}）。` +
-      `请尝试更换输出目录，或检查是否有权限写入「文档」「桌面」等系统目录。`
-    )
-  }
-
-  onProgress({
-    step: '步骤4: 合并模板', currentOrder: '', currentOrderIndex: 0,
-    totalOrders, overallProgress: 95, status: 'writing',
-    message: `步骤4完成：合并 ${filledTemplates.length} 个订单模板，输出 ${totalOut} 条数据`
-  })
-  if (isCancelled) throw new Error('已取消')
-
-  onProgress({
-    step: '完成', currentOrder: '', currentOrderIndex: 0,
-    totalOrders, overallProgress: 100, status: 'completed',
-    message: `生成完成！输出文件：${finalOutputPath}`
-  })
-
-  return {
-    outputPath: finalOutputPath,
-    totalOrders,
-    totalRows: totalOut,
-    skippedRows: 0
-  }
-}
-
-export function cancelGenerate() {
-  isCancelled = true
-}
+// ═══════════════════════════════════════════════════════════════
+// [已废弃] generateImportFile / cancelGenerate
+// 旧的一键生成入口，已被 step1~step3 逐步执行取代。
+// 保留注释代码作为参考，不再编译使用。
+// ═══════════════════════════════════════════════════════════════
+// export async function generateImportFile(
+//   config: KingdeeImportPreset,
+//   onProgress: (progress: KingdeeImportProgress) => void
+// ): Promise<KingdeeImportResult> {
+//   isCancelled = false
+//
+//   if (!fs.existsSync(config.table1Path)) { ... }
+//   ...
+// 完整代码参见 git 历史或旧版本
+//
+//   return {
+//     outputPath: finalOutputPath,
+//     totalOrders,
+//     totalRows: totalOut,
+//     skippedRows: 0
+//   }
+// }
+//
+// export function cancelGenerate() {
+//   isCancelled = true
+// }

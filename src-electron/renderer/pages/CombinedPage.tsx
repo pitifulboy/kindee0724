@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import SearchableSelect from '../components/SearchableSelect'
+import { combinedPage as t, app as appText } from '../config/appText'
 
 // ═══════════════════════════════════════════════════════════════
 // 类型定义
@@ -21,37 +22,48 @@ interface ExcelMergeResult {
 }
 interface OrderFile { id: string; path: string; name: string }
 
-type SourceType = 'table1' | 'constant' | 'billNo' | 'detailSeq' | 'financialSeq' | 'date' | 'materialCode' | 'materialName'
+// billNo/detailSeq/financialSeq/materialCode/materialName 已废弃，改用 seq ID（如 seq-billNo）
+type SourceType = 'table1' | 'constant' | 'date'
 interface FieldMapping {
   id: string; templateCol: string; sourceType: SourceType
-  table1Col?: string; constantValue?: string; financialSeqOffset?: number
+  table1Col?: string; constantValue?: string
+  // financialSeqOffset?: number  // 已废弃，偏移量统一在序號自增配置中管理
+}
+type SeqType = 'constant' | 'sequential' | 'fieldBased'
+interface SeqConfig {
+  id: string
+  name: string
+  type: SeqType
+  constantValue: string
+  start: number
+  step: number
+  baseField: string
 }
 // KingdeeImportPreset 接口已废弃，改用 project 模式
-const sourceTypeOptions = [
-  { value: 'table1', label: '数据表取值' }, { value: 'constant', label: '常量值' },
-  { value: 'billNo', label: '单号自增' }, { value: 'detailSeq', label: '明细序号自增' },
-  { value: 'financialSeq', label: '财务序号(单号+偏移)' }, { value: 'date', label: '日期' },
-  { value: 'materialCode', label: '物料编码' }, { value: 'materialName', label: '物料名称(查模板)' },
+const sourceTypeOptionsBase = [
+  { value: 'table1', label: t.sourceDataTable },
+  { value: 'constant', label: t.sourceConstant },
+  { value: 'date', label: t.sourceDate },
 ]
 
-const RECOMMENDED_CONFIG = {
-  groupByColumn: '采购单号', matchFieldTable1: '金蝶物料编码', matchFieldTable2: '*(订单明细)物料编码#编码',
-  textFormatColumns: ['*(订单明细)物料编码#编码', '*(基本信息)客户#编码', '(基本信息)收货方#编码', '(基本信息)结算方#编码', '(基本信息)付款方#编码', '*(基本信息)交货地点#编码'],
-  fieldMappings: [
-    { templateCol: '*基本信息(序号)', sourceType: 'billNo' as SourceType },
-    { templateCol: '*(基本信息)日期', sourceType: 'date' as SourceType },
-    { templateCol: '*(基本信息)交货地点#编码', sourceType: 'table1' as SourceType, table1Col: '*(基本信息)交货地点#编码' },
-    { templateCol: '*(基本信息)详细地址', sourceType: 'table1' as SourceType, table1Col: '(基本信息)收货方地址' },
-    { templateCol: '(基本信息)客户单号', sourceType: 'table1' as SourceType, table1Col: '采购单号' },
-    { templateCol: '*订单明细(序号)', sourceType: 'detailSeq' as SourceType },
-    { templateCol: '*财务信息(序号)', sourceType: 'financialSeq' as SourceType, financialSeqOffset: 1 },
-    { templateCol: '*(订单明细)物料编码#编码', sourceType: 'materialCode' as SourceType, table1Col: '金蝶物料编码' },
-    { templateCol: '(订单明细)物料编码#名称', sourceType: 'materialName' as SourceType, table1Col: '金蝶物料编码' },
-    { templateCol: '(订单明细)销售数量', sourceType: 'table1' as SourceType, table1Col: '采购数量' },
-    { templateCol: '(订单明细)计价数量', sourceType: 'table1' as SourceType, table1Col: '采购数量' },
-    { templateCol: '*(订单明细)要货日期', sourceType: 'date' as SourceType },
-  ],
-}
+// RECOMMENDED_CONFIG 已废弃（加载推荐按钮已隐藏），仅 handleLoadRecommended 使用
+// const RECOMMENDED_CONFIG = {
+//   groupByColumn: '采购单号', matchFieldTable1: '金蝶物料编码', matchFieldTable2: '*(订单明细)物料编码#编码',
+//   textFormatColumns: ['*(订单明细)物料编码#编码', '*(基本信息)客户#编码', '(基本信息)收货方#编码', '(基本信息)结算方#编码', '(基本信息)付款方#编码', '*(基本信息)交货地点#编码'],
+//   fieldMappings: [
+//     { templateCol: '*基本信息(序号)', sourceType: 'seq-billNo' as any },
+//     { templateCol: '*(基本信息)日期', sourceType: 'date' as any },
+//     { templateCol: '*(基本信息)交货地点#编码', sourceType: 'table1' as any, table1Col: '*(基本信息)交货地点#编码' },
+//     { templateCol: '*(基本信息)详细地址', sourceType: 'table1' as any, table1Col: '(基本信息)收货方地址' },
+//     { templateCol: '(基本信息)客户单号', sourceType: 'table1' as any, table1Col: '采购单号' },
+//     { templateCol: '*订单明细(序号)', sourceType: 'seq-detailSeq' as any },
+//     { templateCol: '*财务信息(序号)', sourceType: 'seq-financialSeq' as any, financialSeqOffset: 1 },
+//     { templateCol: '*(订单明细)物料编码#编码', sourceType: 'table1' as any, table1Col: '金蝶物料编码' },
+//     { templateCol: '(订单明细)销售数量', sourceType: 'table1' as any, table1Col: '采购数量' },
+//     { templateCol: '(订单明细)计价数量', sourceType: 'table1' as any, table1Col: '采购数量' },
+//     { templateCol: '*(订单明细)要货日期', sourceType: 'date' as any },
+//   ],
+// }
 
 // ═══════════════════════════════════════════════════════════════
 // 组件
@@ -88,19 +100,37 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
   // ─── 金蝶导入（无 table1Path，由 mergeResult 自动提供）───
   const [table2Path, setTable2Path] = useState('')
   const [outputDir, setOutputDir] = useState('')
-  const [outputPrefix, setOutputPrefix] = useState('完成_批量金蝶导入')
-  const [startBillNo, setStartBillNo] = useState(111111)
+  const [outputPrefix, setOutputPrefix] = useState(t.defaultOutputPrefix)
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [groupByColumn, setGroupByColumn] = useState('')
   const [matchFieldTable1, setMatchFieldTable1] = useState('')
   const [matchFieldTable2, setMatchFieldTable2] = useState('')
   const [templateHeaderRowIndex, setTemplateHeaderRowIndex] = useState(1)
-  const [templateDataStartRowIndex, setTemplateDataStartRowIndex] = useState(2)
+  // 数据起始行自动为表头行 + 1
+  const templateDataStartRowIndex = templateHeaderRowIndex + 1
   const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([])
+  const [seqConfigs, setSeqConfigs] = useState<SeqConfig[]>(() => [
+    { id: 'seq-billNo', name: '单号自增', type: 'fieldBased', constantValue: '', start: 111111, step: 1, baseField: '' },
+    { id: 'seq-detailSeq', name: '明细序号自增', type: 'fieldBased', constantValue: '', start: 1, step: 1, baseField: '' },
+    { id: 'seq-financialSeq', name: '财务序号', type: 'sequential', constantValue: '', start: 1, step: 1, baseField: '' },
+  ])
   const [kingdeeTextCols, setKingdeeTextCols] = useState<string[]>([])
-  const [newKingdeeTextCol, setNewKingdeeTextCol] = useState('')
+  // newKingdeeTextCol 仅被隐藏的文本格式列 UI 使用，暂注释
+  // const [newKingdeeTextCol, setNewKingdeeTextCol] = useState('')
   const [table1Columns, setTable1Columns] = useState<string[]>([])
   const [templateColumns, setTemplateColumns] = useState<string[]>([])
+
+  // 动态来源选项：date + 所有 seqConfig
+  const sourceTypeOptions = useMemo(() => [
+    ...sourceTypeOptionsBase,
+    ...seqConfigs.map(c => ({ value: c.id, label: c.name })),
+  ], [seqConfigs])
+
+  // 从 seqConfigs 中提取 billNo 相关参数（用于 step1/step2a 订单拆分）
+  const billNoCfg = seqConfigs.find(c => c.id === 'seq-billNo')
+  const startBillNo = billNoCfg?.start ?? 111111
+  const billNoStep = billNoCfg?.step ?? 1
+  const billNoBaseField = billNoCfg?.baseField ?? ''
 
   // ─── 两步执行状态 ───
   const [step1Executing, setStep1Executing] = useState(false)
@@ -131,11 +161,16 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
   const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(null), 4000); return () => clearTimeout(t) } }, [toast])
 
+  // ─── 重复字段弹框 ───
+  const [duplicateDialog, setDuplicateDialog] = useState<{
+    cols: { colName: string; sources: { filePath: string; fileName: string }[] }[]
+  } | null>(null)
+
   // ─── 初始化 ───
   useEffect(() => {
     const init = async () => {
-      const desktop = await window.electronAPI.app.getPath('desktop')
-      setOutputDir(desktop)
+      const documents = await window.electronAPI.app.getPath('documents')
+      setOutputDir(documents)
     }
     init()
     return () => { if (mergeProgressUnsubRef.current) mergeProgressUnsubRef.current() }
@@ -172,15 +207,27 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       const s2 = project.step2Preset
       setTable2Path(s2.table2Path || '')
       setOutputDir(s2.outputDir || '')
-      setOutputPrefix(s2.outputPrefix || '完成_批量金蝶导入')
-      setStartBillNo(s2.startBillNo || 111111)
+      setOutputPrefix(s2.outputPrefix || t.defaultOutputPrefix)
+      // 优先加载 seqConfigs，若不存在则从旧参数迁移
+      if (s2.seqConfigs && s2.seqConfigs.length > 0) {
+        setSeqConfigs(s2.seqConfigs)
+      } else {
+        setSeqConfigs([
+          { id: 'seq-billNo', name: s2.billNoTitle || '单号自增', type: 'fieldBased', constantValue: '', start: s2.startBillNo || 111111, step: s2.billNoStep ?? 1, baseField: s2.billNoBaseField ?? '' },
+          { id: 'seq-detailSeq', name: s2.detailSeqTitle || '明细序号自增', type: 'fieldBased', constantValue: '', start: s2.detailSeqStart ?? 1, step: s2.detailSeqStep ?? 1, baseField: s2.detailSeqBaseField ?? '' },
+          { id: 'seq-financialSeq', name: s2.financialSeqTitle || '财务序号', type: 'sequential', constantValue: '', start: s2.globalFinancialSeqOffset ?? 1, step: s2.financialSeqStep ?? 1, baseField: '' },
+        ])
+      }
       setDate(s2.date || new Date().toISOString().slice(0, 10))
       setGroupByColumn(s2.groupByColumn || '')
       setMatchFieldTable1(s2.matchFieldTable1 || '')
       setMatchFieldTable2(s2.matchFieldTable2 || '')
       setTemplateHeaderRowIndex(s2.templateHeaderRowIndex ?? 1)
-      setTemplateDataStartRowIndex(s2.templateDataStartRowIndex ?? 2)
-      setFieldMappings(s2.fieldMappings || [])
+      setFieldMappings((s2.fieldMappings || []).map((m: any) => {
+        // 迁移旧的 sourceType 到新的 seq ID
+        const oldToNew: Record<string, string> = { billNo: 'seq-billNo', detailSeq: 'seq-detailSeq', financialSeq: 'seq-financialSeq' }
+        return oldToNew[m.sourceType] ? { ...m, sourceType: oldToNew[m.sourceType] } : m
+      }))
       setKingdeeTextCols(s2.textFormatColumns || [])
       // 读取模板表列名
       if (s2.table2Path) {
@@ -224,7 +271,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
             setAuxFilePaths(prev => ({ ...prev, [auxId]: f.path }))
             const colRes = await window.electronAPI.excelMerge.getColumns(f.path)
             if (colRes.success && colRes.data) setAuxColumnsMap(prev => ({ ...prev, [auxId]: colRes.data! }))
-          } else setToast({ type: 'error', msg: '请拖入Excel文件或包含Excel文件的文件夹' })
+          } else setToast({ type: 'error', msg: t.dragExcelHint })
         }
       }
     }
@@ -255,8 +302,8 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                 const colRes = await window.electronAPI.excelMerge.getColumns(newFiles[0].path)
                 if (colRes.success && colRes.data) setOrderColumns(colRes.data)
               }
-            } else if (res.data.length > 0) setToast({ type: 'error', msg: '文件已存在' })
-          } else setToast({ type: 'error', msg: '未找到Excel文件' })
+            } else if (res.data.length > 0) setToast({ type: 'error', msg: t.dragFileExists })
+          } else setToast({ type: 'error', msg: t.dragNoExcel })
         }
       }
     }
@@ -278,7 +325,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           setTable2Path(fp)
           const colRes = await window.electronAPI.kingdeeImport.getTemplateColumns(fp, templateHeaderRowIndex)
           if (colRes.success && colRes.data) setTemplateColumns(colRes.data)
-        } else setToast({ type: 'error', msg: '请拖入Excel文件' })
+        } else setToast({ type: 'error', msg: t.dragInvalid })
       }
     }
     el.addEventListener('dragover', onDragOver); el.addEventListener('dragleave', onDragLeave); el.addEventListener('drop', onDrop)
@@ -293,10 +340,14 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
   const handleClearAllConfig = () => {
     setOrderFiles([]); setAuxTables([])
     setAuxFilePaths({}); setAuxColumnsMap({}); setOrderColumns([])
-    setTable2Path(''); setOutputPrefix('完成_批量金蝶导入')
-    setStartBillNo(111111); setDate(new Date().toISOString().slice(0, 10))
+    setTable2Path(''); setOutputPrefix(t.defaultOutputPrefix)
+    setSeqConfigs([
+      { id: 'seq-billNo', name: '单号自增', type: 'fieldBased', constantValue: '', start: 111111, step: 1, baseField: '' },
+      { id: 'seq-detailSeq', name: '明细序号自增', type: 'fieldBased', constantValue: '', start: 1, step: 1, baseField: '' },
+      { id: 'seq-financialSeq', name: '财务序号', type: 'sequential', constantValue: '', start: 1, step: 1, baseField: '' },
+    ]); setDate(new Date().toISOString().slice(0, 10))
     setGroupByColumn(''); setMatchFieldTable1(''); setMatchFieldTable2('')
-    setTemplateHeaderRowIndex(1); setTemplateDataStartRowIndex(2)
+    setTemplateHeaderRowIndex(1)
     setFieldMappings([]); setKingdeeTextCols([])
     setTable1Columns([]); setTemplateColumns([])
     setMergeResult(null); setMergeProgress(null); setMergeProgressLogs([]); setMergeError('')
@@ -306,47 +357,52 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
 
   /** 保存 Step1（合并Excel）预设到当前项目 */
   const handleSaveStep1Preset = async () => {
-    if (!project) { setToast({ type: 'error', msg: '请先在左侧选择或新建一个项目' }); return }
-    const step1Preset = {
-      orderFiles, auxTables, auxFilePaths, orderColumns, auxColumnsMap
-    }
-    const res = await window.electronAPI.project.updateStep1(project.id, step1Preset)
-    if (res.success) {
-      onProjectUpdate({ ...project, step1Preset })
-      onRefreshProjectList()
-      setToast({ type: 'success', msg: '合并Excel预设已保存到项目' })
-    } else {
-      setToast({ type: 'error', msg: res.error || '保存失败' })
-    }
+    try {
+      if (!project) { setToast({ type: 'error', msg: t.noProjectSelected }); return }
+      const step1Preset = {
+        orderFiles, auxTables, auxFilePaths, orderColumns, auxColumnsMap
+      }
+      const res = await window.electronAPI.project.updateStep1(project.id, step1Preset)
+      if (res.success) {
+        onProjectUpdate({ ...project, step1Preset })
+        onRefreshProjectList()
+        setToast({ type: 'success', msg: t.presetSaved })
+      } else {
+        setToast({ type: 'error', msg: res.error || t.presetSaveFail })
+      }
+    } catch (err: any) { setToast({ type: 'error', msg: err?.message || t.presetSaveFail }) }
   }
 
   /** 保存 Step2（金蝶导入）预设到当前项目 */
   const handleSaveStep2Preset = async () => {
-    if (!project) { setToast({ type: 'error', msg: '请先在左侧选择或新建一个项目' }); return }
-    const step2Preset = {
-      table2Path, outputDir, outputPrefix, startBillNo, date,
-      groupByColumn, matchFieldTable1, matchFieldTable2,
-      templateHeaderRowIndex, templateDataStartRowIndex,
-      fieldMappings, textFormatColumns: kingdeeTextCols
-    }
-    const res = await window.electronAPI.project.updateStep2(project.id, step2Preset)
-    if (res.success) {
-      onProjectUpdate({ ...project, step2Preset })
-      onRefreshProjectList()
-      setToast({ type: 'success', msg: '金蝶导入预设已保存到项目' })
-    } else {
-      setToast({ type: 'error', msg: res.error || '保存失败' })
-    }
+    try {
+      if (!project) { setToast({ type: 'error', msg: t.noProjectSelected }); return }
+      const step2Preset = {
+        table2Path, outputDir, outputPrefix, seqConfigs, date,
+        groupByColumn, matchFieldTable1, matchFieldTable2,
+        templateHeaderRowIndex, templateDataStartRowIndex,
+        fieldMappings, textFormatColumns: kingdeeTextCols
+      }
+      const res = await window.electronAPI.project.updateStep2(project.id, step2Preset)
+      if (res.success) {
+        onProjectUpdate({ ...project, step2Preset })
+        onRefreshProjectList()
+        setToast({ type: 'success', msg: t.presetStep2Saved })
+      } else {
+        setToast({ type: 'error', msg: res.error || t.presetStep2SaveFail })
+      }
+    } catch (err: any) { setToast({ type: 'error', msg: err?.message || t.presetStep2SaveFail }) }
   }
 
-  const handleLoadRecommended = () => {
-    setGroupByColumn(RECOMMENDED_CONFIG.groupByColumn)
-    setMatchFieldTable1(RECOMMENDED_CONFIG.matchFieldTable1)
-    setMatchFieldTable2(RECOMMENDED_CONFIG.matchFieldTable2)
-    setKingdeeTextCols(RECOMMENDED_CONFIG.textFormatColumns)
-    setFieldMappings(RECOMMENDED_CONFIG.fieldMappings.map((m, i) => ({ id: `rec-${Date.now()}-${i}`, ...m })))
-    setToast({ type: 'success', msg: '已加载推荐配置' })
-  }
+  // handleLoadRecommended 已废弃（UI按钮已隐藏），保留注释以供参考
+  // const handleLoadRecommended = () => {
+  //   setGroupByColumn(RECOMMENDED_CONFIG.groupByColumn)
+  //   setMatchFieldTable1(RECOMMENDED_CONFIG.matchFieldTable1)
+  //   setMatchFieldTable2(RECOMMENDED_CONFIG.matchFieldTable2)
+  //   setKingdeeTextCols(RECOMMENDED_CONFIG.textFormatColumns)
+  //   setFieldMappings(RECOMMENDED_CONFIG.fieldMappings.map((m, i) => ({ id: `rec-${Date.now()}-${i}`, ...m })))
+  //   setToast({ type: 'success', msg: t.presetLoaded })
+  // }
 
   // ═══════════════════════════════════════════════════════════
   // 订单文件 & 辅助表操作
@@ -376,7 +432,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
   const handleAddAuxTable = () => {
     setAuxTables(prev => [...prev, {
       id: `aux-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      name: `辅助表${prev.length + 1}`, fileName: '', filePath: '',
+      name: t.auxTableDefaultName(prev.length + 1), fileName: '', filePath: '',
       matchPairs: [{ orderCol: '', auxCol: '' }], how: 'left'
     }])
   }
@@ -436,34 +492,158 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
     }
   }
 
-  const handleAddMapping = () => {
-    setFieldMappings(prev => [...prev, { id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, templateCol: '', sourceType: 'table1', table1Col: '' }])
+  const handleAddMapping = (sourceType: SourceType = 'table1') => {
+    const base: Partial<FieldMapping> = {}
+    if (sourceType === 'constant') base.constantValue = ''
+    setFieldMappings(prev => [...prev, {
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      templateCol: '',
+      sourceType,
+      table1Col: sourceType === 'table1' ? '' : undefined,
+      ...base
+    } as FieldMapping])
   }
   const handleUpdateMapping = (id: string, field: string, value: any) =>
     setFieldMappings(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m))
   const handleDeleteMapping = (id: string) => setFieldMappings(prev => prev.filter(m => m.id !== id))
-  const handleAddTextCol = () => {
-    if (newKingdeeTextCol && !kingdeeTextCols.includes(newKingdeeTextCol)) {
-      setKingdeeTextCols(prev => [...prev, newKingdeeTextCol]); setNewKingdeeTextCol('')
-    }
+
+  // ─── 序号自增配置操作 ───
+  const [draggedSeqId, setDraggedSeqId] = useState<string | null>(null)
+
+  const handleAddSeq = () => {
+    const id = `seq-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`
+    setSeqConfigs(prev => [...prev, { id, name: '新序列', type: 'sequential', constantValue: '', start: 1, step: 1, baseField: '' }])
   }
-  const handleRemoveKingdeeTextCol = (col: string) => setKingdeeTextCols(prev => prev.filter(c => c !== col))
+
+  const handleDeleteSeq = (id: string) => {
+    if (seqConfigs.length <= 1) return
+    setSeqConfigs(prev => prev.filter(c => c.id !== id))
+  }
+
+  const handleReorderSeq = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return
+    setSeqConfigs(prev => {
+      const arr = [...prev]
+      const [moved] = arr.splice(fromIndex, 1)
+      arr.splice(toIndex, 0, moved)
+      return arr
+    })
+  }
+
+  const handleUpdateSeq = (id: string, field: string, value: any) =>
+    setSeqConfigs(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c))
+
+  // ─── 字段映射拖拽排序 ───
+  const [draggedMappingId, setDraggedMappingId] = useState<string | null>(null)
+
+  const reorderMappings = (sourceType: 'table1' | 'other', fromIndex: number, toIndex: number) => {
+    setFieldMappings(prev => {
+      const arr = [...prev]
+      const group = arr.filter(m => sourceType === 'table1' ? m.sourceType === 'table1' : m.sourceType !== 'table1')
+      if (fromIndex < 0 || fromIndex >= group.length || toIndex < 0 || toIndex >= group.length) return prev
+      const [moved] = group.splice(fromIndex, 1)
+      group.splice(toIndex, 0, moved)
+      // 将排序后的组拼回原数组
+      let groupIdx = 0
+      const result = arr.map(m => {
+        const isInGroup = sourceType === 'table1' ? m.sourceType === 'table1' : m.sourceType !== 'table1'
+        if (isInGroup) return group[groupIdx++]
+        return m
+      })
+      return result
+    })
+  }
+  // ─── 文本格式列（UI已隐藏，保留函数供后续启用）───
+  // const handleAddTextCol = () => {
+  //   if (newKingdeeTextCol && !kingdeeTextCols.includes(newKingdeeTextCol)) {
+  //     setKingdeeTextCols(prev => [...prev, newKingdeeTextCol]); setNewKingdeeTextCol('')
+  //   }
+  // }
+  // const handleRemoveKingdeeTextCol = (col: string) => setKingdeeTextCols(prev => prev.filter(c => c !== col))
+
+  /**
+   * 合并前检测：检查所有表是否存在重复字段名（排除匹配关联字段）
+   * 返回：{ colName: string; sources: { filePath: string; fileName: string }[] }[]
+   */
+  const checkDuplicateColumns = async () => {
+    if (orderFiles.length === 0) return []
+    if (auxTables.length === 0) return []
+
+    // 构建排除字段集合（所有匹配字段）
+    const excludedFields = new Set<string>()
+    for (const aux of auxTables) {
+      for (const pair of aux.matchPairs) {
+        if (pair.orderCol) excludedFields.add(pair.orderCol)
+        if (pair.auxCol) excludedFields.add(pair.auxCol)
+      }
+    }
+
+    // 收集所有文件的字段信息
+    const fileColMap: { filePath: string; fileName: string; columns: string[] }[] = []
+
+    // 订单文件
+    for (const ofile of orderFiles) {
+      const res = await window.electronAPI.excelMerge.getColumns(ofile.path)
+      if (res.success && res.data) {
+        fileColMap.push({ filePath: ofile.path, fileName: ofile.name, columns: res.data })
+      }
+    }
+
+    // 辅助表文件
+    for (const aux of auxTables) {
+      const fp = auxFilePaths[aux.id]
+      if (!fp) continue
+      const res = await window.electronAPI.excelMerge.getColumns(fp)
+      if (res.success && res.data) {
+        fileColMap.push({ filePath: fp, fileName: aux.name, columns: res.data })
+      }
+    }
+
+    // 检测重复：遍历所有字段，排除关联字段
+    const seen = new Map<string, { filePath: string; fileName: string }[]>()
+    for (const entry of fileColMap) {
+      for (const col of entry.columns) {
+        if (excludedFields.has(col)) continue
+        if (!seen.has(col)) seen.set(col, [])
+        seen.get(col)!.push({ filePath: entry.filePath, fileName: entry.fileName })
+      }
+    }
+
+    // 只保留出现超过1次的
+    const result: { colName: string; sources: { filePath: string; fileName: string }[] }[] = []
+    for (const [colName, sources] of seen) {
+      // 去重 sources（同字段可能在同一文件重复出现）
+      const unique = sources.filter((s, i, arr) => arr.findIndex(x => x.filePath === s.filePath) === i)
+      if (unique.length > 1) {
+        result.push({ colName, sources: unique })
+      }
+    }
+    return result
+  }
 
   // ═══════════════════════════════════════════════════════════
   // Step 1：合并 Excel
   // ═══════════════════════════════════════════════════════════
   const handleStep1Merge = async () => {
-    if (orderFiles.length === 0) { setToast({ type: 'error', msg: '请先选择订单文件' }); return }
-    if (auxTables.length === 0) { setToast({ type: 'error', msg: '请至少添加一个辅助表' }); return }
+    if (orderFiles.length === 0) { setToast({ type: 'error', msg: t.validateNoOrderFiles }); return }
+    if (auxTables.length === 0) { setToast({ type: 'error', msg: t.validateNoAuxTables }); return }
     for (const aux of auxTables) {
-      if (!auxFilePaths[aux.id]) { setToast({ type: 'error', msg: `辅助表"${aux.name}"未选择文件` }); return }
+      if (!auxFilePaths[aux.id]) { setToast({ type: 'error', msg: t.validateAuxNoFile(aux.name) }); return }
       for (const pair of aux.matchPairs) {
-        if (!pair.orderCol || !pair.auxCol) { setToast({ type: 'error', msg: `辅助表"${aux.name}"有未完成的匹配字段` }); return }
+        if (!pair.orderCol || !pair.auxCol) { setToast({ type: 'error', msg: t.validateAuxIncomplete(aux.name) }); return }
       }
     }
+
+    // 字段重复检测
+    const duplicates = await checkDuplicateColumns()
+    if (duplicates.length > 0) {
+      setDuplicateDialog({ cols: duplicates })
+      return
+    }
+
     setStep1Executing(true); setMergeError(''); setMergeProgressLogs([]); setMergeResult(null)
     setStep1Done(false); setStep1MergedPath('')
-    setExecutePhase('正在合并Excel文件...')
+    setExecutePhase(t.progressMerging)
 
     try {
       const tmpDir = await window.electronAPI.app.getPath('temp')
@@ -475,24 +655,24 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
         orderFilePaths: orderFiles.map(f => f.path), auxFilePaths,
         config: {
           name: project?.name || '临时配置', orderSubFolder: '', auxSubFolder: '',
-          textColumns: [], auxiliaryTables: auxTables, outputFileName: '合并结果.xlsx',
+          textColumns: [], auxiliaryTables: auxTables, outputFileName: t.defaultMergeOutput,
           orderFilePaths: orderFiles.map(f => ({ path: f.path, name: f.name })),
           outputDir: tmpDir
         },
         outputDir: tmpDir
       })
       if (mergeProgressUnsubRef.current) { mergeProgressUnsubRef.current(); mergeProgressUnsubRef.current = null }
-      if (!mergeRes.success || !mergeRes.data) { setToast({ type: 'error', msg: mergeRes.error || '合并失败' }); setStep1Executing(false); return }
+      if (!mergeRes.success || !mergeRes.data) { setToast({ type: 'error', msg: mergeRes.error || t.resultMergeFail }); setStep1Executing(false); return }
       const mergedPath = mergeRes.data.outputPath
       setMergeResult(mergeRes.data)
       setStep1MergedPath(mergedPath)
       setStep1Done(true)
       try { const colRes = await window.electronAPI.kingdeeImport.getTable1Columns(mergedPath); if (colRes.success && colRes.data) setTable1Columns(colRes.data) } catch {}
-      setMergeProgressLogs(prev => [...prev, `✓ 合并完成：${mergeRes.data.totalRows}行`])
-      setExecutePhase('合并完成')
-      setToast({ type: 'success', msg: `合并完成！共 ${mergeRes.data.totalRows} 行` })
+      setMergeProgressLogs(prev => [...prev, t.resultMergeDone(mergeRes.data.totalRows)])
+      setExecutePhase(t.step1DoneLabel)
+      setToast({ type: 'success', msg: t.resultMergeDone(mergeRes.data.totalRows) })
     } catch (e: any) {
-      setToast({ type: 'error', msg: `合并出错: ${e.message}` })
+      setToast({ type: 'error', msg: t.resultMergeError(e) })
     } finally {
       setStep1Executing(false)
     }
@@ -502,73 +682,80 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
   // Step 2：生成导入金蝶的汇总表
   // ═══════════════════════════════════════════════════════════
   const handleStep2Import = async () => {
-    if (!step1Done || !step1MergedPath) { setToast({ type: 'error', msg: '请先执行合并Excel' }); return }
-    if (!table2Path) { setToast({ type: 'error', msg: '请选择模板表(Table2)' }); return }
-    if (!groupByColumn) { setToast({ type: 'error', msg: '请选择分组列' }); return }
-    if (!matchFieldTable1 || !matchFieldTable2) { setToast({ type: 'error', msg: '请配置匹配字段' }); return }
-    if (fieldMappings.length === 0) { setToast({ type: 'error', msg: '请至少配置一个字段映射' }); return }
-    if (!outputDir) { setToast({ type: 'error', msg: '请选择输出目录' }); return }
+    if (!step1Done || !step1MergedPath) { setToast({ type: 'error', msg: t.needStep1First }); return }
+    if (!table2Path) { setToast({ type: 'error', msg: t.validateNoTemplate }); return }
+    if (!groupByColumn) { setToast({ type: 'error', msg: t.validateNoGroupBy }); return }
+    if (!matchFieldTable1 || !matchFieldTable2) { setToast({ type: 'error', msg: t.validateNoMatchField }); return }
+    if (fieldMappings.length === 0) { setToast({ type: 'error', msg: t.validateNoFieldMapping }); return }
+    if (!outputDir) { setToast({ type: 'error', msg: t.validateNoOutputDir }); return }
+    // 校验所有 fieldBased 类型的 seq 配置是否配置了 baseField
+    for (const m of fieldMappings) {
+      const cfg = seqConfigs.find(c => c.id === m.sourceType)
+      if (cfg && cfg.type === 'fieldBased' && !cfg.baseField) {
+        setToast({ type: 'error', msg: `序号自增"${cfg.name}"配置：请选择基于字段` }); return
+      }
+    }
 
     setStep2Executing(true); setFinalResult(null); setMergeProgressLogs([])
-    setExecutePhase('正在生成导入金蝶汇总表...')
+    setExecutePhase(t.progressGenerating)
 
     try {
       const tmpDir = await window.electronAPI.app.getPath('temp')
 
       // Phase 2: 步骤1 - 订单拆分
-      setExecutePhase('步骤1: 订单拆分...')
-      const s1 = await window.electronAPI.kingdeeImport.step1({ table1Path: step1MergedPath, groupByColumn, startBillNo, outputDir: tmpDir })
-      if (!s1.success) { setToast({ type: 'error', msg: s1.error || '步骤1失败' }); setStep2Executing(false); return }
-      setMergeProgressLogs(prev => [...prev, `✓ 步骤1: 订单拆分完成`])
+      setExecutePhase(t.progressStep1)
+      const s1 = await window.electronAPI.kingdeeImport.step1({ table1Path: step1MergedPath, groupByColumn, startBillNo, billNoStep, billNoBaseField, outputDir: tmpDir })
+      if (!s1.success) { setToast({ type: 'error', msg: s1.error || t.progressStep1Fail }); setStep2Executing(false); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep1Done()])
 
       // Phase 3: 步骤2a - Join
-      setExecutePhase('步骤2a: 关联...')
-      const s21 = await window.electronAPI.kingdeeImport.step2a({ table1Path: step1MergedPath, table2Path, groupByColumn, matchFieldTable1, matchFieldTable2, startBillNo, templateHeaderRowIndex, templateDataStartRowIndex, outputDir: tmpDir })
-      if (!s21.success) { setToast({ type: 'error', msg: s21.error || '步骤2a失败' }); setStep2Executing(false); return }
-      setMergeProgressLogs(prev => [...prev, `✓ 步骤2a: Join完成`])
+      setExecutePhase(t.progressStep2a)
+      const s21 = await window.electronAPI.kingdeeImport.step2a({ table1Path: step1MergedPath, table2Path, groupByColumn, matchFieldTable1, matchFieldTable2, startBillNo, billNoStep, billNoBaseField, templateHeaderRowIndex, templateDataStartRowIndex, outputDir: tmpDir })
+      if (!s21.success) { setToast({ type: 'error', msg: s21.error || t.progressStep2aFail }); setStep2Executing(false); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep2aDone])
 
       // Phase 4: 步骤2b - 删除未匹配
-      setExecutePhase('步骤2b: 清理未匹配行...')
+      setExecutePhase(t.progressStep2b)
       const s21Dir = s21.data.outputPath.replace(/\\[^\\]+$/, '')
       const s22 = await window.electronAPI.kingdeeImport.step2b({ inputDir: s21Dir, outputDir: tmpDir })
-      if (!s22.success) { setToast({ type: 'error', msg: s22.error || '步骤2b失败' }); setStep2Executing(false); return }
-      setMergeProgressLogs(prev => [...prev, `✓ 步骤2b: 清理完成`])
+      if (!s22.success) { setToast({ type: 'error', msg: s22.error || t.progressStep2bFail }); setStep2Executing(false); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep2bDone])
 
       // Phase 5: 步骤2c - 填充数据
-      setExecutePhase('步骤2c: 填充数据...')
+      setExecutePhase(t.progressStep2c)
       const s22Dir = s22.data.outputPath.replace(/\\[^\\]+$/, '')
-      const s23 = await window.electronAPI.kingdeeImport.step2c({ inputDir: s22Dir, fieldMappings, date, matchFieldTable1, matchFieldTable2, templateHeaderRowIndex, templateDataStartRowIndex, table2Path, outputDir: tmpDir })
-      if (!s23.success) { setToast({ type: 'error', msg: s23.error || '步骤2c失败' }); setStep2Executing(false); return }
-      setMergeProgressLogs(prev => [...prev, `✓ 步骤2c: 填充完成`])
+      const s23 = await window.electronAPI.kingdeeImport.step2c({ inputDir: s22Dir, fieldMappings, date, matchFieldTable1, matchFieldTable2, templateHeaderRowIndex, templateDataStartRowIndex, table2Path, outputDir: tmpDir, seqConfigs })
+      if (!s23.success) { setToast({ type: 'error', msg: s23.error || t.progressStep2cFail }); setStep2Executing(false); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep2cDone])
 
       // Phase 6: 步骤2d - 恢复结构
-      setExecutePhase('步骤2d: 恢复模板结构...')
+      setExecutePhase(t.progressStep2d)
       const s23Dir = s23.data.outputPath.replace(/\\[^\\]+$/, '')
       const s24 = await window.electronAPI.kingdeeImport.step2d({ inputDir: s23Dir, table2Path, templateHeaderRowIndex, templateDataStartRowIndex, outputDir: tmpDir })
-      if (!s24.success) { setToast({ type: 'error', msg: s24.error || '步骤2d失败' }); setStep2Executing(false); return }
-      setMergeProgressLogs(prev => [...prev, `✓ 步骤2d: 恢复完成`])
+      if (!s24.success) { setToast({ type: 'error', msg: s24.error || t.progressStep2dFail }); setStep2Executing(false); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep2dDone])
 
       // Phase 7: 步骤3 - 汇总
-      setExecutePhase('步骤3: 汇总输出...')
+      setExecutePhase(t.progressStep3)
       const s3 = await window.electronAPI.kingdeeImport.step3({
         table2Path,
         filledTemplateFiles: s24.data.filledTemplateFiles.map((ft: any) => ({ filePath: ft.filePath })),
         templateHeaderRowIndex, templateDataStartRowIndex,
         outputDir, outputPrefix, textFormatColumns: kingdeeTextCols
       })
-      if (!s3.success) { setToast({ type: 'error', msg: s3.error || '步骤3失败' }); setStep2Executing(false); return }
+      if (!s3.success) { setToast({ type: 'error', msg: s3.error || t.progressStep3Fail }); setStep2Executing(false); return }
 
-      setMergeProgressLogs(prev => [...prev, `✓ 全部完成！输出文件：${s3.data.outputPath}`])
+      setMergeProgressLogs(prev => [...prev, t.progressStep3Done(s3.data.outputPath)])
       setFinalResult({
         outputPath: s3.data.outputPath,
         totalOrders: s3.data.totalOrders,
         totalRows: s3.data.totalRows,
         fallbackWarning: s3.data.fallbackWarning
       })
-      setExecutePhase('正式生成完成')
-      setToast({ type: 'success', msg: '金蝶导入汇总表生成完成！' })
+      setExecutePhase(t.resultStep2DoneTitle)
+      setToast({ type: 'success', msg: t.resultStep2DoneMsg })
     } catch (e: any) {
-      setToast({ type: 'error', msg: `生成出错: ${e.message}` })
+      setToast({ type: 'error', msg: t.resultStep2Error(e) })
     } finally {
       setStep2Executing(false)
     }
@@ -578,22 +765,36 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
   // 一键执行
   // ═══════════════════════════════════════════════════════════
   const handleRunAll = async () => {
-    if (!project) { setToast({ type: 'error', msg: '请先在左侧选择或新建一个项目' }); return }
+    if (!project) { setToast({ type: 'error', msg: t.noProjectSelected }); return }
     // Step1 校验
-    if (orderFiles.length === 0) { setToast({ type: 'error', msg: '请先选择订单文件' }); return }
-    if (auxTables.length === 0) { setToast({ type: 'error', msg: '请至少添加一个辅助表' }); return }
+    if (orderFiles.length === 0) { setToast({ type: 'error', msg: t.validateNoOrderFiles }); return }
+    if (auxTables.length === 0) { setToast({ type: 'error', msg: t.validateNoAuxTables }); return }
     for (const aux of auxTables) {
-      if (!auxFilePaths[aux.id]) { setToast({ type: 'error', msg: `辅助表"${aux.name}"未选择文件` }); return }
+      if (!auxFilePaths[aux.id]) { setToast({ type: 'error', msg: t.validateAuxNoFile(aux.name) }); return }
       for (const pair of aux.matchPairs) {
-        if (!pair.orderCol || !pair.auxCol) { setToast({ type: 'error', msg: `辅助表"${aux.name}"有未完成的匹配字段` }); return }
+        if (!pair.orderCol || !pair.auxCol) { setToast({ type: 'error', msg: t.validateAuxIncomplete(aux.name) }); return }
       }
     }
     // Step2 校验
-    if (!table2Path) { setToast({ type: 'error', msg: '请选择模板表(Table2)' }); return }
-    if (!groupByColumn) { setToast({ type: 'error', msg: '请选择分组列' }); return }
-    if (!matchFieldTable1 || !matchFieldTable2) { setToast({ type: 'error', msg: '请配置匹配字段' }); return }
-    if (fieldMappings.length === 0) { setToast({ type: 'error', msg: '请至少配置一个字段映射' }); return }
-    if (!outputDir) { setToast({ type: 'error', msg: '请选择输出目录' }); return }
+    if (!table2Path) { setToast({ type: 'error', msg: t.validateNoTemplate }); return }
+    if (!groupByColumn) { setToast({ type: 'error', msg: t.validateNoGroupBy }); return }
+    if (!matchFieldTable1 || !matchFieldTable2) { setToast({ type: 'error', msg: t.validateNoMatchField }); return }
+    if (fieldMappings.length === 0) { setToast({ type: 'error', msg: t.validateNoFieldMapping }); return }
+    if (!outputDir) { setToast({ type: 'error', msg: t.validateNoOutputDir }); return }
+    // 校验所有 fieldBased 类型的 seq 配置是否配置了 baseField
+    for (const m of fieldMappings) {
+      const cfg = seqConfigs.find(c => c.id === m.sourceType)
+      if (cfg && cfg.type === 'fieldBased' && !cfg.baseField) {
+        setToast({ type: 'error', msg: `序号自增"${cfg.name}"配置：请选择基于字段` }); return
+      }
+    }
+
+    // 字段重复检测（与 handleStep1Merge 共享 checkDuplicateColumns）
+    const duplicates = await checkDuplicateColumns()
+    if (duplicates.length > 0) {
+      setDuplicateDialog({ cols: duplicates })
+      return
+    }
 
     setIsRunAll(true)
     setMergeError(''); setMergeProgressLogs([]); setMergeResult(null); setFinalResult(null)
@@ -604,7 +805,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
 
       // ── Step 1: 合并 Excel ──
       setStep1Executing(true)
-      setExecutePhase('正在合并Excel文件...')
+      setExecutePhase(t.progressMerging)
       mergeProgressUnsubRef.current = window.electronAPI.excelMerge.onProgress(prog => {
         setMergeProgress(prog)
         if (prog.message) setMergeProgressLogs(prev => [...prev, prog.message!])
@@ -613,72 +814,72 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
         orderFilePaths: orderFiles.map(f => f.path), auxFilePaths,
         config: {
           name: project.name, orderSubFolder: '', auxSubFolder: '',
-          textColumns: [], auxiliaryTables: auxTables, outputFileName: '合并结果.xlsx',
+          textColumns: [], auxiliaryTables: auxTables, outputFileName: t.defaultMergeOutput,
           orderFilePaths: orderFiles.map(f => ({ path: f.path, name: f.name })),
           outputDir: tmpDir
         },
         outputDir: tmpDir
       })
       if (mergeProgressUnsubRef.current) { mergeProgressUnsubRef.current(); mergeProgressUnsubRef.current = null }
-      if (!mergeRes.success || !mergeRes.data) { setToast({ type: 'error', msg: mergeRes.error || '合并失败' }); setStep1Executing(false); setIsRunAll(false); return }
+      if (!mergeRes.success || !mergeRes.data) { setToast({ type: 'error', msg: mergeRes.error || t.resultMergeFail }); setStep1Executing(false); setIsRunAll(false); return }
       const mergedPath = mergeRes.data.outputPath
       setMergeResult(mergeRes.data)
       setStep1MergedPath(mergedPath)
       setStep1Done(true)
       try { const colRes = await window.electronAPI.kingdeeImport.getTable1Columns(mergedPath); if (colRes.success && colRes.data) setTable1Columns(colRes.data) } catch {}
-      setMergeProgressLogs(prev => [...prev, `✓ 合并完成：${mergeRes.data.totalRows}行`])
+      setMergeProgressLogs(prev => [...prev, t.resultMergeDone(mergeRes.data.totalRows)])
       setStep1Executing(false)
 
       // ── Step 2: 生成导入金蝶汇总表 ──
       setStep2Executing(true)
-      setExecutePhase('步骤1: 订单拆分...')
-      const s1 = await window.electronAPI.kingdeeImport.step1({ table1Path: mergedPath, groupByColumn, startBillNo, outputDir: tmpDir })
-      if (!s1.success) { setToast({ type: 'error', msg: s1.error || '步骤1失败' }); setStep2Executing(false); setIsRunAll(false); return }
-      setMergeProgressLogs(prev => [...prev, `✓ 步骤1: 订单拆分完成`])
+      setExecutePhase(t.progressStep1)
+      const s1 = await window.electronAPI.kingdeeImport.step1({ table1Path: mergedPath, groupByColumn, startBillNo, billNoStep, billNoBaseField, outputDir: tmpDir })
+      if (!s1.success) { setToast({ type: 'error', msg: s1.error || t.progressStep1Fail }); setStep2Executing(false); setIsRunAll(false); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep1Done()])
 
-      setExecutePhase('步骤2a: 关联...')
-      const s21 = await window.electronAPI.kingdeeImport.step2a({ table1Path: mergedPath, table2Path, groupByColumn, matchFieldTable1, matchFieldTable2, startBillNo, templateHeaderRowIndex, templateDataStartRowIndex, outputDir: tmpDir })
-      if (!s21.success) { setToast({ type: 'error', msg: s21.error || '步骤2a失败' }); setStep2Executing(false); setIsRunAll(false); return }
-      setMergeProgressLogs(prev => [...prev, `✓ 步骤2a: Join完成`])
+      setExecutePhase(t.progressStep2a)
+      const s21 = await window.electronAPI.kingdeeImport.step2a({ table1Path: mergedPath, table2Path, groupByColumn, matchFieldTable1, matchFieldTable2, startBillNo, billNoStep, billNoBaseField, templateHeaderRowIndex, templateDataStartRowIndex, outputDir: tmpDir })
+      if (!s21.success) { setToast({ type: 'error', msg: s21.error || t.progressStep2aFail }); setStep2Executing(false); setIsRunAll(false); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep2aDone])
 
-      setExecutePhase('步骤2b: 清理未匹配行...')
+      setExecutePhase(t.progressStep2b)
       const s21Dir = s21.data.outputPath.replace(/\\[^\\]+$/, '')
       const s22 = await window.electronAPI.kingdeeImport.step2b({ inputDir: s21Dir, outputDir: tmpDir })
-      if (!s22.success) { setToast({ type: 'error', msg: s22.error || '步骤2b失败' }); setStep2Executing(false); setIsRunAll(false); return }
-      setMergeProgressLogs(prev => [...prev, `✓ 步骤2b: 清理完成`])
+      if (!s22.success) { setToast({ type: 'error', msg: s22.error || t.progressStep2bFail }); setStep2Executing(false); setIsRunAll(false); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep2bDone])
 
-      setExecutePhase('步骤2c: 填充数据...')
+      setExecutePhase(t.progressStep2c)
       const s22Dir = s22.data.outputPath.replace(/\\[^\\]+$/, '')
-      const s23 = await window.electronAPI.kingdeeImport.step2c({ inputDir: s22Dir, fieldMappings, date, matchFieldTable1, matchFieldTable2, templateHeaderRowIndex, templateDataStartRowIndex, table2Path, outputDir: tmpDir })
-      if (!s23.success) { setToast({ type: 'error', msg: s23.error || '步骤2c失败' }); setStep2Executing(false); setIsRunAll(false); return }
-      setMergeProgressLogs(prev => [...prev, `✓ 步骤2c: 填充完成`])
+      const s23 = await window.electronAPI.kingdeeImport.step2c({ inputDir: s22Dir, fieldMappings, date, matchFieldTable1, matchFieldTable2, templateHeaderRowIndex, templateDataStartRowIndex, table2Path, outputDir: tmpDir, seqConfigs })
+      if (!s23.success) { setToast({ type: 'error', msg: s23.error || t.progressStep2cFail }); setStep2Executing(false); setIsRunAll(false); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep2cDone])
 
-      setExecutePhase('步骤2d: 恢复模板结构...')
+      setExecutePhase(t.progressStep2d)
       const s23Dir = s23.data.outputPath.replace(/\\[^\\]+$/, '')
       const s24 = await window.electronAPI.kingdeeImport.step2d({ inputDir: s23Dir, table2Path, templateHeaderRowIndex, templateDataStartRowIndex, outputDir: tmpDir })
-      if (!s24.success) { setToast({ type: 'error', msg: s24.error || '步骤2d失败' }); setStep2Executing(false); setIsRunAll(false); return }
-      setMergeProgressLogs(prev => [...prev, `✓ 步骤2d: 恢复完成`])
+      if (!s24.success) { setToast({ type: 'error', msg: s24.error || t.progressStep2dFail }); setStep2Executing(false); setIsRunAll(false); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep2dDone])
 
-      setExecutePhase('步骤3: 汇总输出...')
+      setExecutePhase(t.progressStep3)
       const s3 = await window.electronAPI.kingdeeImport.step3({
         table2Path,
         filledTemplateFiles: s24.data.filledTemplateFiles.map((ft: any) => ({ filePath: ft.filePath })),
         templateHeaderRowIndex, templateDataStartRowIndex,
         outputDir, outputPrefix, textFormatColumns: kingdeeTextCols
       })
-      if (!s3.success) { setToast({ type: 'error', msg: s3.error || '步骤3失败' }); setStep2Executing(false); setIsRunAll(false); return }
+      if (!s3.success) { setToast({ type: 'error', msg: s3.error || t.progressStep3Fail }); setStep2Executing(false); setIsRunAll(false); return }
 
-      setMergeProgressLogs(prev => [...prev, `✓ 全部完成！输出文件：${s3.data.outputPath}`])
+      setMergeProgressLogs(prev => [...prev, t.progressStep3Done(s3.data.outputPath)])
       setFinalResult({
         outputPath: s3.data.outputPath,
         totalOrders: s3.data.totalOrders,
         totalRows: s3.data.totalRows,
         fallbackWarning: s3.data.fallbackWarning
       })
-      setExecutePhase('全部完成')
-      setToast({ type: 'success', msg: '一键执行完成！金蝶导入汇总表已生成' })
+      setExecutePhase(t.resultAllDone)
+      setToast({ type: 'success', msg: t.resultAllDoneMsg })
     } catch (e: any) {
-      setToast({ type: 'error', msg: `执行出错: ${e.message}` })
+      setToast({ type: 'error', msg: t.resultExecutionError(e) })
     } finally {
       setStep1Executing(false)
       setStep2Executing(false)
@@ -701,10 +902,56 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
 
       {/* Toast */}
       {toast && (
-        <div className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg ${
+        <div className={`fixed top-14 right-6 z-[100] px-5 py-3 rounded-xl shadow-lg ${
           toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'
         }`}>
           <span className="text-white text-sm font-medium">{toast.msg}</span>
+        </div>
+      )}
+
+      {/* 重复字段弹框 */}
+      {duplicateDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setDuplicateDialog(null)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* 标题 */}
+            <div className="flex items-center px-5 py-4 border-b border-red-100 bg-red-50">
+              <svg className="w-5 h-5 text-red-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <span className="ml-2 text-sm font-semibold text-red-800">检测到重复字段名称</span>
+            </div>
+            {/* 内容 */}
+            <div className="px-5 py-4 max-h-80 overflow-y-auto space-y-4">
+              <p className="text-xs text-gray-500">以下字段（已排除关联字段）在多个表中存在，请修改后重新执行：</p>
+              {duplicateDialog.cols.map((item, idx) => (
+                <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                  <div className="flex items-center">
+                    <span className="text-sm font-mono font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded">{item.colName}</span>
+                    <span className="ml-2 text-xs text-gray-400">在以下文件中重复：</span>
+                  </div>
+                  <div className="mt-2 space-y-1">
+                    {item.sources.map((src, si) => (
+                      <div key={si}
+                        className="flex items-center text-xs text-blue-600 hover:text-blue-800 cursor-pointer group"
+                        onClick={() => window.electronAPI.shell.showItemInFolder(src.filePath)}>
+                        <svg className="w-3.5 h-3.5 mr-1.5 flex-shrink-0 text-gray-400 group-hover:text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <span className="truncate" title={src.filePath}>{src.fileName}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* 底部按钮 */}
+            <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
+              <button onClick={() => setDuplicateDialog(null)}
+                className="px-4 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium transition-colors">
+                关闭
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -722,14 +969,14 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
               <div>
                 <span className="text-sm font-semibold text-gray-800">{project.name}</span>
                 <span className="text-xs text-gray-400 ml-3">
-                  最后修改：{new Date(project.updatedAt).toLocaleString('zh-CN')}
+                  {t.labelLastModified}{new Date(project.updatedAt).toLocaleString(appText.locale)}
                 </span>
               </div>
             </div>
             <div className="flex items-center space-x-2">
               <button onClick={handleClearAllConfig} disabled={isExecuting}
                 className="px-3 py-1.5 text-sm text-gray-500 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50">
-                清空配置
+                {t.btnClearConfig}
               </button>
             </div>
           </div>
@@ -739,10 +986,32 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       {/* ══════════════════════════════════════════════════════
           快捷操作工具栏
           ══════════════════════════════════════════════════════ */}
-      <div className="bg-white rounded-lg border-2 border-gray-200 p-4">
-        <div className="flex items-center space-x-4">
-          <button onClick={handleRunAll} disabled={isExecuting}
+      <div className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm rounded-lg border-2 border-gray-200 p-4 shadow-md">
+        <div className="flex items-center justify-end space-x-4">
+          <button onClick={handleStep1Merge} disabled={step1Executing}
             className="px-5 py-2 text-sm font-semibold text-white bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg hover:from-blue-600 hover:to-blue-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+            {step1Executing && (
+              <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            )}
+            {step1Executing ? t.btnStep1Merging : t.btnStep1Merge}
+          </button>
+          <button onClick={handleStep2Import}
+            disabled={step2Executing || !step1Done}
+            className="px-5 py-2 text-sm font-semibold text-white bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg hover:from-blue-600 hover:to-blue-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            title={!step1Done ? t.needStep1First : ''}>
+            {step2Executing && (
+              <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            )}
+            {step2Executing ? t.btnStep2Generating : t.btnStep2Generate}
+          </button>
+          <button onClick={handleRunAll} disabled={isExecuting}
+            className="px-5 py-2 text-sm font-semibold text-green-700 bg-gradient-to-r from-green-50 to-green-100 rounded-xl border border-green-200 hover:from-green-100 hover:to-green-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
             {isRunAll ? (
               <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -753,31 +1022,8 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
               </svg>
             )}
-            {isRunAll ? '执行中...' : '一键执行'}
+            {isRunAll ? t.btnRunAllExecuting : t.btnRunAll}
           </button>
-          <button onClick={handleStep1Merge} disabled={step1Executing}
-            className="px-5 py-2 text-sm font-semibold text-white bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg hover:from-blue-600 hover:to-blue-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
-            {step1Executing && (
-              <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            )}
-            {step1Executing ? '合并中...' : '执行合并Excel'}
-          </button>
-          <button onClick={handleStep2Import}
-            disabled={step2Executing || !step1Done}
-            className="px-5 py-2 text-sm font-semibold text-white bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg hover:from-blue-600 hover:to-blue-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-            title={!step1Done ? '请先执行合并Excel' : ''}>
-            {step2Executing && (
-              <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            )}
-            {step2Executing ? '生成中...' : '生成导入金蝶汇总表'}
-          </button>
-          {!step1Done && <span className="text-sm text-gray-400">（需先执行合并Excel）</span>}
         </div>
       </div>
 
@@ -787,12 +1033,12 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       <div className="bg-white rounded-lg border-2 border-blue-200 p-4">
         <h2 className="text-base font-semibold text-blue-700 mb-4 flex items-center">
           <span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold mr-2">1</span>
-          合并Excel
+          {t.step1Title}
         </h2>
 
         {/* 文件配置 */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 mb-4">
-          <h3 className="text-sm font-semibold text-gray-800 mb-4">文件配置</h3>
+          <h3 className="text-sm font-semibold text-gray-800 mb-4">{t.sectionFileConfig}</h3>
 
           {/* 订单文件 */}
           <div className="mb-4">
@@ -800,15 +1046,15 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
               className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-colors ${
                 orderFileDragOver ? 'border-blue-400 bg-blue-50 border-dashed' : 'border-gray-200'
               }`}>
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">订单文件:</label>
+              <label className="text-sm text-gray-600 w-32 flex-shrink-0">{t.labelOrderFiles}</label>
               <button onClick={handleSelectOrderFiles} disabled={isExecuting}
-                className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">选择文件</button>
+                className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">{t.btnSelectFile}</button>
               <span className="text-sm text-gray-500 truncate flex-1">
-                {orderFiles.length > 0 ? `已选 ${orderFiles.length} 个文件` : '拖拽文件或文件夹到此处'}
+                {orderFiles.length > 0 ? `已选 ${orderFiles.length} 个文件` : t.placeholderDragFile}
               </span>
               {orderFiles.length > 0 && (
                 <button onClick={() => { setOrderFiles([]); setOrderColumns([]) }} disabled={isExecuting}
-                  className="text-xs text-red-500 hover:text-red-600 flex-shrink-0">清空</button>
+                  className="text-xs text-red-500 hover:text-red-600 flex-shrink-0">{t.btnClear}</button>
               )}
             </div>
             {orderFiles.length > 0 && (
@@ -830,10 +1076,10 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           {/* 辅助表 */}
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-gray-700">辅助表配置</h3>
-              <button onClick={handleAddAuxTable} disabled={isExecuting} className="btn-primary text-sm">+ 添加辅助表</button>
+              <h3 className="text-sm font-semibold text-gray-700">{t.sectionAuxTable}</h3>
+              <button onClick={handleAddAuxTable} disabled={isExecuting} className="btn-primary text-sm">{t.btnAddAuxTable}</button>
             </div>
-            {auxTables.length === 0 && <p className="text-xs text-gray-400 text-center py-3">尚未添加辅助表</p>}
+            {auxTables.length === 0 && <p className="text-xs text-gray-400 text-center py-3">{t.noAuxTable}</p>}
             <div className="space-y-3">
               {auxTables.map((aux, auxIndex) => {
                 const auxCols = auxColumnsMap[aux.id] || []
@@ -847,40 +1093,40 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                           className="text-sm font-medium text-gray-700 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none px-1" />
                       </div>
                       <button onClick={() => handleRemoveAuxTable(aux.id)} disabled={isExecuting}
-                        className="text-xs text-red-500 hover:text-red-600">删除</button>
+                        className="text-xs text-red-500 hover:text-red-600">{t.btnDelete}</button>
                     </div>
                     <div ref={el => { auxDropRefs.current[aux.id] = el }}
                       onMouseEnter={() => setupAuxDrop(aux.id)}
                       className={`flex items-center space-x-3 mb-2 p-2 rounded-lg border-2 transition-colors ${
                         auxDragOver[aux.id] ? 'border-blue-400 bg-blue-50 border-dashed' : 'border-gray-200'
                       }`}>
-                      <label className="text-xs text-gray-500 w-12 flex-shrink-0">文件:</label>
-                      <span className="flex-1 text-sm text-gray-600 truncate">{aux.fileName || '拖入文件或点击选择'}</span>
+                      <label className="text-xs text-gray-500 w-12 flex-shrink-0">{t.labelFile}</label>
+                      <span className="flex-1 text-sm text-gray-600 truncate">{aux.fileName || t.placeholderDragOrClick}</span>
                       <button onClick={() => handleSelectAuxFile(aux.id)} disabled={isExecuting}
-                        className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">选择</button>
+                        className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">{t.btnSelect}</button>
                     </div>
                     <div className="flex items-center space-x-3 mb-2">
-                      <span className="text-xs text-gray-500">连接方式:</span>
+                      <span className="text-xs text-gray-500">{t.labelJoinType}</span>
                       <select value={aux.how} onChange={e => updateAuxTable(aux.id, { how: e.target.value as 'left' | 'inner' | 'right' })}
                         disabled={isExecuting} className="px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 w-36">
-                        <option value="left">Left Join</option>
-                        <option value="inner">Inner Join</option>
-                        <option value="right">Right Join</option>
+                        <option value="left">{t.joinLeft}</option>
+                        <option value="inner">{t.joinInner}</option>
+                        <option value="right">{t.joinRight}</option>
                       </select>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500 mb-1">匹配字段:</p>
+                      <p className="text-xs text-gray-500 mb-1">{t.labelMatchField}</p>
                       {aux.matchPairs.map((pair, pi) => (
                         <div key={pi} className="flex items-center space-x-2 mb-1">
-                          <span className="text-xs text-gray-400 w-10">订单</span>
+                          <span className="text-xs text-gray-400 w-10">{t.labelOrder}</span>
                           <SearchableSelect value={pair.orderCol} options={orderColumns}
                             onChange={v => updateMatchPair(aux.id, pi, 'orderCol', v)}
-                            placeholder="— 列 —" disabled={isExecuting} />
+                            placeholder={t.placeholderSelectCol} disabled={isExecuting} />
                           <span className="text-gray-400 text-xs">↔</span>
-                          <span className="text-xs text-gray-400 w-10">辅助</span>
+                          <span className="text-xs text-gray-400 w-10">{t.labelAux}</span>
                           <SearchableSelect value={pair.auxCol} options={auxCols}
                             onChange={v => updateMatchPair(aux.id, pi, 'auxCol', v)}
-                            placeholder="— 列 —" disabled={isExecuting} />
+                            placeholder={t.placeholderSelectCol} disabled={isExecuting} />
                           {aux.matchPairs.length > 1 && (
                             <button onClick={() => handleRemoveMatchPair(aux.id, pi)} disabled={isExecuting}
                               className="p-1 text-gray-300 hover:text-red-500 text-xs">✕</button>
@@ -888,7 +1134,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                         </div>
                       ))}
                       <button onClick={() => handleAddMatchPair(aux.id)} disabled={isExecuting}
-                        className="text-xs text-blue-500 hover:text-blue-600 mt-1">+ 添加匹配字段</button>
+                        className="text-xs text-blue-500 hover:text-blue-600 mt-1">{t.btnAddMatchField}</button>
                     </div>
                   </div>
                 )
@@ -903,7 +1149,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           {step1Done && (
             <span className="text-sm text-green-600 flex items-center">
               <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-              合并已完成
+              {t.step1DoneLabel}
             </span>
           )}
           <div className="flex-1" />
@@ -912,7 +1158,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
             </svg>
-            保存预设
+            {t.btnSavePreset}
           </button>
         </div>
 
@@ -962,24 +1208,41 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
 
             {/* 合并结果统计 */}
             {mergeResult && !step1Executing && (
-              <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <div className="flex items-center space-x-6">
-                  <div className="text-center">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm font-semibold text-blue-700">
+                    <svg className="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {t.step1DoneLabel}
+                  </span>
+                  <button onClick={() => window.electronAPI.shell.openPath(mergeResult.outputPath)}
+                    className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">{t.btnOpenOutput}</button>
+                </div>
+                <div className="grid grid-cols-4 gap-3 mb-3">
+                  <div className="bg-white rounded p-2 text-center">
                     <p className="text-lg font-bold text-blue-600">{mergeResult.totalRows}</p>
-                    <p className="text-xs text-blue-600">合并总行数</p>
+                    <p className="text-xs text-blue-600">{t.statTotalRows}</p>
                   </div>
-                  <div className="text-center">
+                  <div className="bg-white rounded p-2 text-center">
                     <p className="text-lg font-bold text-blue-600">{mergeResult.totalColumns}</p>
-                    <p className="text-xs text-blue-600">合并总列数</p>
+                    <p className="text-xs text-blue-600">{t.statTotalCols}</p>
                   </div>
-                  <div className="text-center">
-                    <p className="text-lg font-bold text-blue-600">{mergeResult.matchedCount}</p>
-                    <p className="text-xs text-blue-600">匹配行数</p>
+                  <div className="bg-white rounded p-2 text-center">
+                    <p className="text-lg font-bold text-green-600">{mergeResult.matchedCount}</p>
+                    <p className="text-xs text-green-600">{t.statMatchedRows}</p>
                   </div>
-                  <div className="text-center">
+                  <div className="bg-white rounded p-2 text-center">
                     <p className="text-lg font-bold text-amber-600">{mergeResult.unmatchedCount}</p>
-                    <p className="text-xs text-amber-600">未匹配行数</p>
+                    <p className="text-xs text-amber-600">{t.statUnmatchedRows}</p>
                   </div>
+                </div>
+                <div>
+                  <div className="text-xs text-blue-800 mb-1">{t.statOutputFile}</div>
+                  <button onClick={() => window.electronAPI.shell.openPath(mergeResult.outputPath)}
+                    className="text-xs text-blue-600 hover:text-blue-800 truncate block max-w-xs">
+                    {mergeResult.outputPath}
+                  </button>
                 </div>
               </div>
             )}
@@ -993,31 +1256,31 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       <div className="bg-white rounded-lg border-2 border-green-200 p-4">
         <h2 className="text-base font-semibold text-green-700 mb-4 flex items-center">
           <span className="w-6 h-6 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-xs font-bold mr-2">2</span>
-          生成导入金蝶的汇总表
+          {t.step2Title}
         </h2>
 
         {/* 模板表 & 输出配置 */}
         <div className="bg-white rounded-lg border-2 border-gray-100 p-4 mb-4">
-          <h3 className="text-sm font-semibold text-gray-800 mb-4">模板表 & 输出配置</h3>
+          <h3 className="text-sm font-semibold text-gray-800 mb-4">{t.sectionOutputConfig}</h3>
           <div className="space-y-3">
             <div ref={table2DropRef}
               className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-colors ${
                 table2DragOver ? 'border-blue-400 bg-blue-50 border-dashed' : 'border-gray-200'
               }`}>
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">模板表(Table2):</label>
+              <label className="text-sm text-gray-600 w-32 flex-shrink-0">{t.labelTemplateTable}</label>
               <button onClick={handleSelectTable2} disabled={isExecuting}
-                className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">选择文件</button>
-              <span className="text-sm text-gray-500 truncate flex-1">{table2Path || '拖入文件或点击选择'}</span>
+                className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">{t.btnSelectFile}</button>
+              <span className="text-sm text-gray-500 truncate flex-1">{table2Path || t.placeholderDragOrClick}</span>
             </div>
             <div className="flex items-center space-x-3 p-3 rounded-lg border-2 border-gray-200">
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">输出目录:</label>
+              <label className="text-sm text-gray-600 w-32 flex-shrink-0">{t.labelOutputDir}</label>
               <input type="text" value={outputDir} onClick={handleSelectOutputDir} readOnly
                 disabled={isExecuting}
                 className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50 cursor-pointer"
-                placeholder="点击选择目录" />
+                placeholder={t.placeholderSelectDir} />
             </div>
             <div className="flex items-center space-x-3 p-3 rounded-lg border-2 border-gray-200">
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">输出文件前缀:</label>
+              <label className="text-sm text-gray-600 w-32 flex-shrink-0">{t.labelOutputPrefix}</label>
               <input type="text" value={outputPrefix} onChange={e => setOutputPrefix(e.target.value)}
                 disabled={isExecuting}
                 className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
@@ -1027,19 +1290,27 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
 
         {/* 客户订单拆分字段配置 */}
         <div className="bg-white rounded-lg border-2 border-gray-200 p-4 mb-4">
-          <h3 className="text-sm font-semibold text-gray-800 mb-3">客户订单拆分字段配置</h3>
-          <div className="grid grid-cols-2 gap-3">
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">{t.sectionSplitConfig}</h3>
+          <div className="space-y-3">
             <div className="flex items-center space-x-3">
-              <label className="text-sm text-gray-600 w-28 flex-shrink-0">起始单号:</label>
-              <input type="number" value={startBillNo} onChange={e => setStartBillNo(parseInt(e.target.value) || 0)}
-                disabled={isExecuting}
-                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
-            </div>
-            <div className="flex items-center space-x-3">
-              <label className="text-sm text-gray-600 w-28 flex-shrink-0">分组列:</label>
+              <label className="text-sm text-gray-600 w-28 flex-shrink-0">{t.labelGroupByColumn}</label>
               <div className="flex-1">
                 <SearchableSelect value={groupByColumn} options={orderColumns} onChange={setGroupByColumn}
-                  placeholder="— 选择列 —" disabled={isExecuting} />
+                  placeholder={t.placeholderSelectCol} disabled={isExecuting} />
+              </div>
+            </div>
+            <div className="flex items-center space-x-3">
+              <label className="text-sm text-gray-600 w-28 flex-shrink-0">{t.labelMatchFieldTable}</label>
+              <div className="flex-1">
+                <SearchableSelect value={matchFieldTable1} options={table1Columns} onChange={setMatchFieldTable1}
+                  placeholder={t.selectPlaceholder} disabled={isExecuting} />
+              </div>
+            </div>
+            <div className="flex items-center space-x-3">
+              <label className="text-sm text-gray-600 w-28 flex-shrink-0">{t.labelMatchFieldTemplate}</label>
+              <div className="flex-1">
+                <SearchableSelect value={matchFieldTable2} options={templateColumns} onChange={setMatchFieldTable2}
+                  placeholder={t.selectPlaceholder} disabled={isExecuting} />
               </div>
             </div>
           </div>
@@ -1047,120 +1318,209 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
 
         {/* 表格字段配置 */}
         <div className="bg-white rounded-lg border border-gray-100 p-4 mb-4">
-          <h3 className="text-sm font-semibold text-gray-800 mb-4">表格字段配置</h3>
+          <h3 className="text-sm font-semibold text-gray-800 mb-4">{t.sectionFieldConfig}</h3>
 
-          <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="space-y-3 mb-4">
             <div className="flex items-center space-x-3">
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">数据表匹配字段:</label>
-              <div className="flex-1">
-                <SearchableSelect value={matchFieldTable1} options={table1Columns} onChange={setMatchFieldTable1}
-                  placeholder="— 选择数据表列 —" disabled={isExecuting} />
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">模板匹配字段:</label>
-              <div className="flex-1">
-                <SearchableSelect value={matchFieldTable2} options={templateColumns} onChange={setMatchFieldTable2}
-                  placeholder="— 选择模板列 —" disabled={isExecuting} />
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">模板表头行:</label>
+              <label className="text-sm text-gray-600 w-32 flex-shrink-0">{t.labelTemplateHeaderRow}</label>
               <input type="number" value={templateHeaderRowIndex}
                 onChange={e => handleHeaderRowChange(parseInt(e.target.value) || 0)}
                 disabled={isExecuting}
-                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
+                className="max-w-64 flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
             </div>
             <div className="flex items-center space-x-3">
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">数据起始行:</label>
-              <input type="number" value={templateDataStartRowIndex}
-                onChange={e => setTemplateDataStartRowIndex(parseInt(e.target.value) || 0)}
+              <label className="text-sm text-gray-600 w-32 flex-shrink-0">{t.labelDate}</label>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)}
                 disabled={isExecuting}
-                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
+                className="max-w-64 flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
             </div>
           </div>
 
-          <div className="flex items-center space-x-3 mb-4">
-            <label className="text-sm text-gray-600 w-32 flex-shrink-0">日期:</label>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)}
-              disabled={isExecuting}
-              className="w-52 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
-          </div>
-
-          {/* 字段映射 */}
-          <div className="mb-4">
-            <div className="flex items-center space-x-3 mb-3">
-              <span className="text-sm font-medium text-gray-700">字段映射:</span>
-              <button onClick={handleAddMapping} disabled={isExecuting}
-                className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50">+ 添加映射</button>
+          {/* 序号自增配置 */}
+          <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t.sectionAutoInc}</p>
+              <button onClick={handleAddSeq} disabled={isExecuting}
+                className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50">{t.btnAdd}</button>
             </div>
-            <div className="space-y-2">
-              {fieldMappings.map((mapping) => (
-                <div key={mapping.id} className="border border-gray-200 rounded p-3 bg-white">
-                  <div className="flex items-start space-x-3">
-                    <div className="flex-1">
-                      <label className="text-xs text-gray-500 block mb-1">模板列</label>
-                      <SearchableSelect value={mapping.templateCol} options={templateColumns}
-                        onChange={val => handleUpdateMapping(mapping.id, 'templateCol', val)}
-                        placeholder="— 选择模板列 —" disabled={isExecuting} />
-                    </div>
-                    <div className="flex-1">
-                      <label className="text-xs text-gray-500 block mb-1">来源类型</label>
-                      <select value={mapping.sourceType} onChange={e => handleUpdateMapping(mapping.id, 'sourceType', e.target.value)}
-                        disabled={isExecuting}
-                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50">
-                        {sourceTypeOptions.map(opt => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
-                      </select>
-                    </div>
-                    <div className="w-24 flex-shrink-0 pt-5">
-                      <button onClick={() => handleDeleteMapping(mapping.id)} disabled={isExecuting}
-                        className="px-3 py-1.5 text-sm bg-red-100 text-red-600 rounded hover:bg-red-200 disabled:opacity-50">删除</button>
-                    </div>
+            <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollSnapType: 'x mandatory' }}>
+              {seqConfigs.map((cfg, idx) => (
+                <div key={cfg.id}
+                  draggable={!isExecuting}
+                  onDragStart={() => setDraggedSeqId(cfg.id)}
+                  onDragOver={e => { e.preventDefault(); if (draggedSeqId && draggedSeqId !== cfg.id) { const from = seqConfigs.findIndex(c => c.id === draggedSeqId); if (from >= 0) handleReorderSeq(from, idx); setDraggedSeqId(cfg.id) } }}
+                  onDragEnd={() => setDraggedSeqId(null)}
+                  className={`flex-shrink-0 bg-white rounded-lg border p-3 transition-all duration-150 ${draggedSeqId === cfg.id ? 'border-blue-600 shadow-lg ring-2 ring-blue-300 opacity-80 scale-[1.02]' : 'border-gray-200 hover:border-blue-200'}`}
+                  style={{ minWidth: 260, maxWidth: 280, scrollSnapAlign: 'start' }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <input type="text" value={cfg.name} onChange={e => handleUpdateSeq(cfg.id, 'name', e.target.value)}
+                      disabled={isExecuting}
+                      className="flex-1 text-xs font-semibold text-blue-700 bg-transparent border-b border-dashed border-blue-200 focus:outline-none focus:border-blue-500 disabled:opacity-50 mr-2" />
+                    <button onClick={() => handleDeleteSeq(cfg.id)} disabled={isExecuting || seqConfigs.length <= 1}
+                      className="text-xs text-red-400 hover:text-red-600 disabled:opacity-30 flex-shrink-0">✕</button>
                   </div>
-                  {(mapping.sourceType === 'table1' || mapping.sourceType === 'materialCode' || mapping.sourceType === 'materialName') && (
-                    <div className="mt-3">
-                      <label className="text-xs text-gray-500 block mb-1">数据表列</label>
-                      <SearchableSelect value={mapping.table1Col || ''} options={table1Columns}
-                        onChange={val => handleUpdateMapping(mapping.id, 'table1Col', val)}
-                        placeholder="— 选择数据表列 —" disabled={isExecuting} />
-                    </div>
+                  <select value={cfg.type} onChange={e => handleUpdateSeq(cfg.id, 'type', e.target.value)}
+                    disabled={isExecuting}
+                    className="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50 mb-2">
+                    <option value="constant">{t.sourceConstant}</option>
+                    <option value="sequential">{t.autoIncRuleStep}</option>
+                    <option value="fieldBased">{t.labelBaseField}</option>
+                  </select>
+                  {cfg.type === 'constant' && (
+                    <input type="text" value={cfg.constantValue} onChange={e => handleUpdateSeq(cfg.id, 'constantValue', e.target.value)}
+                      disabled={isExecuting} placeholder={t.placeholderConstant}
+                      className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
                   )}
-                  {mapping.sourceType === 'constant' && (
-                    <div className="mt-3">
-                      <label className="text-xs text-gray-500 block mb-1">常量值</label>
-                      <input type="text" value={mapping.constantValue || ''}
-                        onChange={e => handleUpdateMapping(mapping.id, 'constantValue', e.target.value)}
+                  {cfg.type === 'sequential' && (
+                    <>
+                      <label className="text-xs text-gray-500 block mb-1">{t.labelBillNoStart}</label>
+                      <input type="number" value={cfg.start} onChange={e => handleUpdateSeq(cfg.id, 'start', parseInt(e.target.value) || 0)}
+                        disabled={isExecuting}
+                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50 mb-2" />
+                      <label className="text-xs text-gray-500 block mb-1">{t.labelBillNoStep}</label>
+                      <input type="number" min="1" value={cfg.step} onChange={e => handleUpdateSeq(cfg.id, 'step', Math.max(1, parseInt(e.target.value) || 1))}
                         disabled={isExecuting}
                         className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
-                    </div>
+                    </>
                   )}
-                  {mapping.sourceType === 'financialSeq' && (
-                    <div className="mt-3">
-                      <label className="text-xs text-gray-500 block mb-1">偏移量(默认1)</label>
-                      <input type="number" value={mapping.financialSeqOffset ?? 1}
-                        onChange={e => handleUpdateMapping(mapping.id, 'financialSeqOffset', parseInt(e.target.value) || 1)}
+                  {cfg.type === 'fieldBased' && (
+                    <>
+                      <label className="text-xs text-gray-500 block mb-1">{t.labelBaseField}</label>
+                      <select value={cfg.baseField} onChange={e => handleUpdateSeq(cfg.id, 'baseField', e.target.value)}
+                        disabled={isExecuting || orderColumns.length === 0}
+                        className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50 mb-2">
+                        <option value="">{t.placeholderSelectCol}</option>
+                        {orderColumns.map(col => <option key={col} value={col}>{col}</option>)}
+                      </select>
+                      <label className="text-xs text-gray-500 block mb-1">{t.labelBillNoStart}</label>
+                      <input type="number" value={cfg.start} onChange={e => handleUpdateSeq(cfg.id, 'start', parseInt(e.target.value) || 0)}
+                        disabled={isExecuting}
+                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50 mb-2" />
+                      <label className="text-xs text-gray-500 block mb-1">{t.labelBillNoStep}</label>
+                      <input type="number" min="1" value={cfg.step} onChange={e => handleUpdateSeq(cfg.id, 'step', Math.max(1, parseInt(e.target.value) || 1))}
                         disabled={isExecuting}
                         className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
-                    </div>
+                    </>
                   )}
                 </div>
               ))}
             </div>
           </div>
 
-          {/* 文本格式列 */}
+          {/* 字段映射 — 数据表取值 */}
           <div className="mb-4">
             <div className="flex items-center space-x-3 mb-3">
-              <span className="text-sm font-medium text-gray-700">文本格式列（步骤3汇总用）:</span>
+              <span className="text-sm font-medium text-gray-700">{t.sectionFieldMappingData}</span>
+              <button onClick={() => handleAddMapping('table1')} disabled={isExecuting}
+                className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50">{t.btnAddMappingData}</button>
+            </div>
+            <div className="space-y-2">
+              {fieldMappings.filter(m => m.sourceType === 'table1').map((mapping, idx, arr) => (
+                <div key={mapping.id}
+                  draggable={!isExecuting}
+                  onDragStart={() => setDraggedMappingId(mapping.id)}
+                  onDragOver={e => { e.preventDefault(); setDraggedMappingId(prev => prev || mapping.id) }}
+                  onDrop={e => { e.preventDefault(); if (draggedMappingId && draggedMappingId !== mapping.id) { const fromIdx = arr.findIndex(m => m.id === draggedMappingId); if (fromIdx >= 0) reorderMappings('table1', fromIdx, idx) }; setDraggedMappingId(null) }}
+                  onDragEnd={() => setDraggedMappingId(null)}
+                  className={`border-2 rounded p-3 bg-white cursor-default transition-all duration-150 ${draggedMappingId === mapping.id ? 'border-blue-600 shadow-lg ring-2 ring-blue-300 opacity-80 scale-[1.02]' : 'border border-gray-200 hover:border-blue-200'}`}>
+                  <div className="flex items-start space-x-3">
+                    <div className="flex items-center self-start pt-2 text-gray-300 cursor-grab active:cursor-grabbing">
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM8 14a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM8 22a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-xs text-gray-500 block mb-1">{t.labelTemplateCol}</label>
+                      <SearchableSelect value={mapping.templateCol} options={templateColumns}
+                        onChange={val => handleUpdateMapping(mapping.id, 'templateCol', val)}
+                        placeholder={t.selectPlaceholder} disabled={isExecuting} />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-xs text-gray-500 block mb-1">{t.labelDataTableCol}</label>
+                      <SearchableSelect value={mapping.table1Col || ''} options={table1Columns}
+                        onChange={val => handleUpdateMapping(mapping.id, 'table1Col', val)}
+                        placeholder={t.selectPlaceholder} disabled={isExecuting} />
+                    </div>
+                    <div className="w-24 flex-shrink-0 pt-5">
+                      <button onClick={() => handleDeleteMapping(mapping.id)} disabled={isExecuting}
+                        className="px-3 py-1.5 text-sm bg-red-100 text-red-600 rounded hover:bg-red-200 disabled:opacity-50">{t.btnDelete}</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {fieldMappings.filter(m => m.sourceType === 'table1').length === 0 && (
+                <p className="text-xs text-gray-400 text-center py-3">{t.noMappingsData}</p>
+              )}
+            </div>
+          </div>
+
+          {/* 字段映射 — 非数据表取值 */}
+          <div className="mb-4">
+            <div className="flex items-center space-x-3 mb-3">
+              <span className="text-sm font-medium text-gray-700">{t.sectionFieldMappingOther}</span>
+              <button onClick={() => handleAddMapping('constant')} disabled={isExecuting}
+                className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50">{t.btnAddMappingOther}</button>
+            </div>
+            <div className="space-y-2">
+              {fieldMappings.filter(m => m.sourceType !== 'table1').map((mapping, idx, arr) => (
+                <div key={mapping.id}
+                  draggable={!isExecuting}
+                  onDragStart={() => setDraggedMappingId(mapping.id)}
+                  onDragOver={e => { e.preventDefault(); setDraggedMappingId(prev => prev || mapping.id) }}
+                  onDrop={e => { e.preventDefault(); if (draggedMappingId && draggedMappingId !== mapping.id) { const fromIdx = arr.findIndex(m => m.id === draggedMappingId); if (fromIdx >= 0) reorderMappings('other', fromIdx, idx) }; setDraggedMappingId(null) }}
+                  onDragEnd={() => setDraggedMappingId(null)}
+                  className={`border-2 rounded p-3 bg-white cursor-default transition-all duration-150 ${draggedMappingId === mapping.id ? 'border-blue-600 shadow-lg ring-2 ring-blue-300 opacity-80 scale-[1.02]' : 'border border-gray-200 hover:border-blue-200'}`}>
+                  <div className="flex items-start space-x-3">
+                    <div className="flex items-center self-start pt-2 text-gray-300 cursor-grab active:cursor-grabbing">
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM8 14a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM8 22a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-xs text-gray-500 block mb-1">{t.labelTemplateCol}</label>
+                      <SearchableSelect value={mapping.templateCol} options={templateColumns}
+                        onChange={val => handleUpdateMapping(mapping.id, 'templateCol', val)}
+                        placeholder={t.selectPlaceholder} disabled={isExecuting} />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-xs text-gray-500 block mb-1">{t.labelSourceType}</label>
+                      <select value={mapping.sourceType} onChange={e => handleUpdateMapping(mapping.id, 'sourceType', e.target.value)}
+                        disabled={isExecuting}
+                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50">
+                        {sourceTypeOptions.filter(o => o.value !== 'table1').map(opt => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
+                      </select>
+                    </div>
+                    <div className="w-24 flex-shrink-0 pt-5">
+                      <button onClick={() => handleDeleteMapping(mapping.id)} disabled={isExecuting}
+                        className="px-3 py-1.5 text-sm bg-red-100 text-red-600 rounded hover:bg-red-200 disabled:opacity-50">{t.btnDelete}</button>
+                    </div>
+                  </div>
+                  {mapping.sourceType === 'constant' && (
+                    <div className="mt-3">
+                      <label className="text-xs text-gray-500 block mb-1">{t.labelConstantValue}</label>
+                      <input type="text" value={mapping.constantValue || ''}
+                        onChange={e => handleUpdateMapping(mapping.id, 'constantValue', e.target.value)}
+                        disabled={isExecuting}
+                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
+                    </div>
+                  )}
+                </div>
+              ))}
+              {fieldMappings.filter(m => m.sourceType !== 'table1').length === 0 && (
+                <p className="text-xs text-gray-400 text-center py-3">{t.noMappingsOther}</p>
+              )}
+            </div>
+          </div>
+
+          {/* 文本格式列（暂隐藏） */}
+          {/* <div className="mb-4">
+            <div className="flex items-center space-x-3 mb-3">
+              <span className="text-sm font-medium text-gray-700">{t.sectionTextFormat}</span>
             </div>
             <div className="flex items-center space-x-3 mb-2">
               <div className="w-56">
                 <SearchableSelect value={newKingdeeTextCol} options={templateColumns}
                   onChange={setNewKingdeeTextCol}
-                  placeholder="— 选择列 —" disabled={isExecuting} />
+                  placeholder={t.selectPlaceholder} disabled={isExecuting} />
               </div>
               <button onClick={handleAddTextCol} disabled={isExecuting || !newKingdeeTextCol}
-                className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50">添加</button>
+                className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50">{t.btnAdd}</button>
             </div>
             <div className="flex flex-wrap gap-2">
               {kingdeeTextCols.map(col => (
@@ -1171,29 +1531,31 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                 </span>
               ))}
             </div>
-          </div>
+          </div> */}
         </div>
 
         {/* Step 2 — 操作按钮 */}
         <div className="flex items-center space-x-3 mb-4">
-          {!step1Done && <span className="text-sm text-gray-400">（需先执行合并Excel）</span>}
+          {!step1Done && <span className="text-sm text-gray-400">{t.needStep1First}</span>}
           {finalResult && !step2Executing && (
             <span className="text-sm text-green-600 flex items-center">
               <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-              已生成
+              {t.step2DoneLabel}
             </span>
           )}
           <div className="flex-1" />
+          {/* 隐藏：加载推荐预设
           <button onClick={handleLoadRecommended} disabled={isExecuting}
             className="px-3 py-2 text-sm border border-amber-300 text-amber-600 rounded-lg hover:bg-amber-50 shadow-sm disabled:opacity-50">
-            加载推荐配置
+            {t.btnLoadPreset}
           </button>
+          */}
           <button onClick={handleSaveStep2Preset} disabled={isExecuting || !project}
             className="px-3 py-2 text-sm border border-green-300 text-green-600 rounded-lg hover:bg-green-50 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
             </svg>
-            保存预设
+            {t.btnSavePreset}
           </button>
         </div>
 
@@ -1234,23 +1596,23 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                     <svg className="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    金蝶导入汇总表已生成
+                    {t.resultStep2DoneOutput}
                   </span>
                   <button onClick={handleOpenFinalOutput}
-                    className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">打开输出目录</button>
+                    className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">{t.btnOpenOutput}</button>
                 </div>
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   <div className="bg-white rounded p-2 text-center">
                     <p className="text-lg font-bold text-green-600">{finalResult.totalOrders}</p>
-                    <p className="text-xs text-green-600">拆分订单数</p>
+                    <p className="text-xs text-green-600">{t.statSplitOrders}</p>
                   </div>
                   <div className="bg-white rounded p-2 text-center">
                     <p className="text-lg font-bold text-amber-600">{finalResult.totalRows}</p>
-                    <p className="text-xs text-amber-600">汇总输出行数</p>
+                    <p className="text-xs text-amber-600">{t.statOutputRows}</p>
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-green-800 mb-1">输出文件:</div>
+                  <div className="text-xs text-green-800 mb-1">{t.statOutputFile}</div>
                   <button onClick={() => window.electronAPI.shell.openPath(finalResult.outputPath)}
                     className="text-xs text-green-600 hover:text-green-800 truncate block max-w-xs">
                     {finalResult.outputPath}

@@ -47,6 +47,11 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
     return { success: true }
   })
 
+  ipcMain.handle('shell:showItemInFolder', async (_event, filePath: string) => {
+    shell.showItemInFolder(filePath)
+    return { success: true }
+  })
+
   // 扫描目录中的Excel文件（支持拖拽文件夹）
   ipcMain.handle('file:listExcelFiles', async (_event, dirPath: string) => {
     try {
@@ -82,36 +87,80 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
 
   ipcMain.handle('project:save', async (_event, project: projectManager.ProjectItem) => {
     try {
-      projectManager.saveProject(project)
+      await projectManager.saveProject(project)
       return { success: true }
     } catch (error: any) { return { success: false, error: error.message } }
   })
 
   ipcMain.handle('project:delete', async (_event, id: string) => {
     try {
-      const deleted = projectManager.deleteProject(id)
+      const deleted = await projectManager.deleteProject(id)
       return { success: deleted, error: deleted ? undefined : `项目不存在` }
     } catch (error: any) { return { success: false, error: error.message } }
   })
 
   ipcMain.handle('project:rename', async (_event, id: string, newName: string) => {
     try {
-      const renamed = projectManager.renameProject(id, newName)
+      const renamed = await projectManager.renameProject(id, newName)
       return { success: renamed, error: renamed ? undefined : `项目不存在` }
     } catch (error: any) { return { success: false, error: error.message } }
   })
 
   ipcMain.handle('project:updateStep1', async (_event, id: string, preset: projectManager.Step1Preset) => {
     try {
-      const ok = projectManager.updateStep1Preset(id, preset)
+      const ok = await projectManager.updateStep1Preset(id, preset)
       return { success: ok, error: ok ? undefined : `项目不存在` }
     } catch (error: any) { return { success: false, error: error.message } }
   })
 
   ipcMain.handle('project:updateStep2', async (_event, id: string, preset: projectManager.Step2Preset) => {
     try {
-      const ok = projectManager.updateStep2Preset(id, preset)
+      const ok = await projectManager.updateStep2Preset(id, preset)
       return { success: ok, error: ok ? undefined : `项目不存在` }
+    } catch (error: any) { return { success: false, error: error.message } }
+  })
+
+  // ─── 项目导入 / 导出 ───
+  ipcMain.handle('project:export', async () => {
+    try {
+      const data = projectManager.exportProjects()
+      if (Object.keys(data).length === 0) {
+        return { success: false, error: '暂无项目可导出' }
+      }
+      // 直接写入 temp（始终可写），返回路径给前端
+      const fileName = `项目预设_${new Date().toISOString().slice(0, 10)}.json`
+      const tmpPath = path.join(app.getPath('temp'), 'electron-office-projects', fileName)
+      const tmpDir = path.dirname(tmpPath)
+      if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
+      fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf-8')
+      return { success: true, data: { count: Object.keys(data).length, filePath: tmpPath } }
+    } catch (error: any) { return { success: false, error: error.message } }
+  })
+
+  ipcMain.handle('project:import', async () => {
+    try {
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: '导入项目预设',
+        filters: [{ name: 'JSON 文件', extensions: ['json'] }],
+        properties: ['openFile']
+      })
+      if (result.canceled || result.filePaths.length === 0) return { success: false, error: '用户取消' }
+      const content = fs.readFileSync(result.filePaths[0], 'utf-8')
+      const projects = JSON.parse(content)
+      const count = await projectManager.importProjects(projects)
+      return { success: true, data: { count } }
+    } catch (error: any) { return { success: false, error: error.message } }
+  })
+
+  ipcMain.handle('project:importFromFile', async (_event, filePath: string) => {
+    try {
+      if (!fs.existsSync(filePath)) {
+        return { success: false, error: '文件不存在' }
+      }
+      const content = fs.readFileSync(filePath, 'utf-8')
+      const projects = JSON.parse(content)
+      const count = await projectManager.importProjects(projects)
+      return { success: true, data: { count } }
     } catch (error: any) { return { success: false, error: error.message } }
   })
 }
