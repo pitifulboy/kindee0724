@@ -3,8 +3,11 @@ node_cache
 dist
 dist-electron
 release
+release-v*/
+asar-extract/
 *.log
 .DS_Store
 .trae-cn
+.workbuddy
 icons/myicons.jpg
 采购单号/

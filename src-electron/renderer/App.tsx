@@ -206,13 +206,13 @@ const App: React.FC = () => {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-50">
       {/* 自定义标题栏 */}
-      <header className="flex items-center h-10 bg-primary-900 border-b border-primary-800 px-4 select-none flex-shrink-0"
+      <header className="flex items-center h-10 bg-black border-b border-gray-900 px-4 select-none flex-shrink-0"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
         <div className="flex items-center space-x-2">
           <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 ring-1 ring-white/30 shadow-sm">
             <img src="icon.ico" className="w-full h-full block" alt="logo" style={{ objectFit: 'cover' }} />
           </div>
-          <span className="text-sm font-semibold text-blue-100 tracking-wide">新味智枢</span>
+          <span className="text-sm font-semibold text-white tracking-wide">新味智枢</span>
         </div>
       </header>
 
@@ -223,19 +223,16 @@ const App: React.FC = () => {
         <header className="bg-white border-b border-gray-200 px-6 py-5 flex-shrink-0 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-bold text-gray-900">
+              <h2 className="text-lg font-bold text-black">
                 {activeProject ? activeProject.name : appText.placeholderSelectProject}
               </h2>
               {activeProject && (
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-black mt-1">
                   {appText.lastModified}{new Date(activeProject.updatedAt).toLocaleString(appText.locale)}
                 </p>
               )}
             </div>
-            <div className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-green-50 to-green-100 rounded-xl border border-green-200">
-              <div className="w-2 h-2 rounded-full bg-green-400 shadow-sm shadow-green-300" />
-              <span className="text-xs text-green-700 font-semibold">{appText.statusOnline}</span>
-            </div>
+            {/* 本地离线状态指示器已隐藏 */}
           </div>
         </header>
 
@@ -249,11 +246,7 @@ const App: React.FC = () => {
         </main>
 
         {/* 底部状态栏 */}
-        <footer className="bg-white border-t border-gray-100 px-6 py-2.5 flex-shrink-0">
-          <p className="text-center text-xs text-gray-400">
-            {appText.footerText}
-          </p>
-        </footer>
+        {/* 底部状态栏已隐藏 */}
       </div>
 
       {/* 项目管理 — 右侧 */}

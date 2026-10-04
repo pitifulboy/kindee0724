@@ -903,7 +903,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       {/* Toast */}
       {toast && (
         <div className={`fixed top-14 right-6 z-[100] px-5 py-3 rounded-xl shadow-lg ${
-          toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+          toast.type === 'success' ? 'bg-primary-800' : 'bg-red-500'
         }`}>
           <span className="text-white text-sm font-medium">{toast.msg}</span>
         </div>
@@ -922,19 +922,19 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
             </div>
             {/* 内容 */}
             <div className="px-5 py-4 max-h-80 overflow-y-auto space-y-4">
-              <p className="text-xs text-gray-500">以下字段（已排除关联字段）在多个表中存在，请修改后重新执行：</p>
+              <p className="text-xs text-black">以下字段（已排除关联字段）在多个表中存在，请修改后重新执行：</p>
               {duplicateDialog.cols.map((item, idx) => (
                 <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
                   <div className="flex items-center">
                     <span className="text-sm font-mono font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded">{item.colName}</span>
-                    <span className="ml-2 text-xs text-gray-400">在以下文件中重复：</span>
+                    <span className="ml-2 text-xs text-black">在以下文件中重复：</span>
                   </div>
                   <div className="mt-2 space-y-1">
                     {item.sources.map((src, si) => (
                       <div key={si}
-                        className="flex items-center text-xs text-blue-600 hover:text-blue-800 cursor-pointer group"
+                        className="flex items-center text-xs text-black hover:text-black cursor-pointer group"
                         onClick={() => window.electronAPI.shell.showItemInFolder(src.filePath)}>
-                        <svg className="w-3.5 h-3.5 mr-1.5 flex-shrink-0 text-gray-400 group-hover:text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className="w-3.5 h-3.5 mr-1.5 flex-shrink-0 text-black group-hover:text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         <span className="truncate" title={src.filePath}>{src.fileName}</span>
@@ -947,7 +947,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
             {/* 底部按钮 */}
             <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
               <button onClick={() => setDuplicateDialog(null)}
-                className="px-4 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium transition-colors">
+                className="px-4 py-2 text-sm bg-primary-800 text-white rounded-lg hover:bg-primary-700 font-medium transition-colors">
                 关闭
               </button>
             </div>
@@ -962,20 +962,20 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
         <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
               </svg>
               <div>
-                <span className="text-sm font-semibold text-gray-800">{project.name}</span>
-                <span className="text-xs text-gray-400 ml-3">
+                <span className="text-sm font-semibold text-black">{project.name}</span>
+                <span className="text-xs text-black ml-3">
                   {t.labelLastModified}{new Date(project.updatedAt).toLocaleString(appText.locale)}
                 </span>
               </div>
             </div>
             <div className="flex items-center space-x-2">
               <button onClick={handleClearAllConfig} disabled={isExecuting}
-                className="px-3 py-1.5 text-sm text-gray-500 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50">
+                className="px-3 py-1.5 text-sm text-black border border-gray-200 rounded hover:bg-gray-50 disabled:cursor-not-allowed">
                 {t.btnClearConfig}
               </button>
             </div>
@@ -989,7 +989,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       <div className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm rounded-lg border-2 border-gray-200 p-4 shadow-md">
         <div className="flex items-center justify-end space-x-4">
           <button onClick={handleStep1Merge} disabled={step1Executing}
-            className="px-5 py-2 text-sm font-semibold text-white bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg hover:from-blue-600 hover:to-blue-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+            className="px-5 py-2 text-sm font-semibold text-white bg-primary-800 rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
             {step1Executing && (
               <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -1000,7 +1000,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           </button>
           <button onClick={handleStep2Import}
             disabled={step2Executing || !step1Done}
-            className="px-5 py-2 text-sm font-semibold text-white bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg hover:from-blue-600 hover:to-blue-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            className="px-5 py-2 text-sm font-semibold text-white bg-primary-800 rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center"
             title={!step1Done ? t.needStep1First : ''}>
             {step2Executing && (
               <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -1011,7 +1011,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
             {step2Executing ? t.btnStep2Generating : t.btnStep2Generate}
           </button>
           <button onClick={handleRunAll} disabled={isExecuting}
-            className="px-5 py-2 text-sm font-semibold text-green-700 bg-gradient-to-r from-green-50 to-green-100 rounded-xl border border-green-200 hover:from-green-100 hover:to-green-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+            className="px-5 py-2 text-sm font-semibold text-white bg-primary-800 rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
             {isRunAll ? (
               <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -1031,42 +1031,42 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           第一步：合并Excel
           ══════════════════════════════════════════════════════ */}
       <div className="bg-white rounded-lg border-2 border-blue-200 p-4">
-        <h2 className="text-base font-semibold text-blue-700 mb-4 flex items-center">
-          <span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold mr-2">1</span>
+        <h2 className="text-base font-semibold text-black mb-4 flex items-center">
+          <span className="w-6 h-6 bg-primary-800 text-white rounded-full flex items-center justify-center text-xs font-bold mr-2">1</span>
           {t.step1Title}
         </h2>
 
         {/* 文件配置 */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 mb-4">
-          <h3 className="text-sm font-semibold text-gray-800 mb-4">{t.sectionFileConfig}</h3>
+          <h3 className="text-sm font-semibold text-black mb-4">{t.sectionFileConfig}</h3>
 
           {/* 订单文件 */}
           <div className="mb-4">
             <div ref={orderFileDropRef}
               className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-colors ${
-                orderFileDragOver ? 'border-blue-400 bg-blue-50 border-dashed' : 'border-gray-200'
+                orderFileDragOver ? 'border-primary-400 bg-primary-800 border-dashed' : 'border-gray-200'
               }`}>
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">{t.labelOrderFiles}</label>
+              <label className="text-sm text-black w-32 flex-shrink-0">{t.labelOrderFiles}</label>
               <button onClick={handleSelectOrderFiles} disabled={isExecuting}
-                className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">{t.btnSelectFile}</button>
-              <span className="text-sm text-gray-500 truncate flex-1">
+                className="px-3 py-1.5 text-sm bg-primary-800 text-white rounded hover:bg-primary-700 disabled:cursor-not-allowed">{t.btnSelectFile}</button>
+              <span className="text-sm text-black truncate flex-1">
                 {orderFiles.length > 0 ? `已选 ${orderFiles.length} 个文件` : t.placeholderDragFile}
               </span>
               {orderFiles.length > 0 && (
                 <button onClick={() => { setOrderFiles([]); setOrderColumns([]) }} disabled={isExecuting}
-                  className="text-xs text-red-500 hover:text-red-600 flex-shrink-0">{t.btnClear}</button>
+                  className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100">{t.btnClear}</button>
               )}
             </div>
             {orderFiles.length > 0 && (
               <div className="mt-2 max-h-24 overflow-y-auto space-y-0.5 pl-2">
                 {orderFiles.map((f, i) => (
                   <div key={f.id} className="flex items-center justify-between px-1 py-0.5 hover:bg-gray-50 rounded">
-                    <span className="text-xs text-gray-500 truncate flex-1">
-                      <span className="text-gray-400 mr-1">{i + 1}.</span>
+                    <span className="text-xs text-black truncate flex-1">
+                      <span className="text-black mr-1">{i + 1}.</span>
                       {f.name}
                     </span>
                     <button onClick={() => handleRemoveOrderFile(f.id)} disabled={isExecuting}
-                      className="p-0.5 text-gray-300 hover:text-red-500 text-xs flex-shrink-0">✕</button>
+                      className="px-1.5 py-0.5 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 flex-shrink-0">✕</button>
                   </div>
                 ))}
               </div>
@@ -1076,10 +1076,10 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           {/* 辅助表 */}
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-gray-700">{t.sectionAuxTable}</h3>
+              <h3 className="text-sm font-semibold text-black">{t.sectionAuxTable}</h3>
               <button onClick={handleAddAuxTable} disabled={isExecuting} className="btn-primary text-sm">{t.btnAddAuxTable}</button>
             </div>
-            {auxTables.length === 0 && <p className="text-xs text-gray-400 text-center py-3">{t.noAuxTable}</p>}
+            {auxTables.length === 0 && <p className="text-xs text-black text-center py-3">{t.noAuxTable}</p>}
             <div className="space-y-3">
               {auxTables.map((aux, auxIndex) => {
                 const auxCols = auxColumnsMap[aux.id] || []
@@ -1087,54 +1087,54 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                   <div key={aux.id} className="border-2 border-gray-200 rounded-lg p-3 shadow-sm">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center space-x-2">
-                        <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">{auxIndex + 1}</span>
+                        <span className="w-5 h-5 bg-primary-800 text-white rounded-full flex items-center justify-center text-xs font-bold">{auxIndex + 1}</span>
                         <input type="text" value={aux.name} onChange={e => updateAuxTable(aux.id, { name: e.target.value })}
                           disabled={isExecuting}
-                          className="text-sm font-medium text-gray-700 bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none px-1" />
+                          className="text-sm font-medium text-black bg-transparent border-b border-transparent hover:border-gray-300 focus:border-primary-500 focus:outline-none px-1" />
                       </div>
                       <button onClick={() => handleRemoveAuxTable(aux.id)} disabled={isExecuting}
-                        className="text-xs text-red-500 hover:text-red-600">{t.btnDelete}</button>
+                        className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100">{t.btnDelete}</button>
                     </div>
                     <div ref={el => { auxDropRefs.current[aux.id] = el }}
                       onMouseEnter={() => setupAuxDrop(aux.id)}
                       className={`flex items-center space-x-3 mb-2 p-2 rounded-lg border-2 transition-colors ${
-                        auxDragOver[aux.id] ? 'border-blue-400 bg-blue-50 border-dashed' : 'border-gray-200'
+                        auxDragOver[aux.id] ? 'border-primary-400 bg-primary-800 border-dashed' : 'border-gray-200'
                       }`}>
-                      <label className="text-xs text-gray-500 w-12 flex-shrink-0">{t.labelFile}</label>
-                      <span className="flex-1 text-sm text-gray-600 truncate">{aux.fileName || t.placeholderDragOrClick}</span>
+                      <label className="text-xs text-black w-12 flex-shrink-0">{t.labelFile}</label>
+                      <span className="flex-1 text-sm text-black truncate">{aux.fileName || t.placeholderDragOrClick}</span>
                       <button onClick={() => handleSelectAuxFile(aux.id)} disabled={isExecuting}
-                        className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">{t.btnSelect}</button>
+                        className="px-3 py-1.5 text-sm bg-primary-800 text-white rounded hover:bg-primary-700 disabled:cursor-not-allowed">{t.btnSelect}</button>
                     </div>
                     <div className="flex items-center space-x-3 mb-2">
-                      <span className="text-xs text-gray-500">{t.labelJoinType}</span>
+                      <span className="text-xs text-black">{t.labelJoinType}</span>
                       <select value={aux.how} onChange={e => updateAuxTable(aux.id, { how: e.target.value as 'left' | 'inner' | 'right' })}
-                        disabled={isExecuting} className="px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 w-36">
+                        disabled={isExecuting} className="px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 w-36">
                         <option value="left">{t.joinLeft}</option>
                         <option value="inner">{t.joinInner}</option>
                         <option value="right">{t.joinRight}</option>
                       </select>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500 mb-1">{t.labelMatchField}</p>
+                      <p className="text-xs text-black mb-1">{t.labelMatchField}</p>
                       {aux.matchPairs.map((pair, pi) => (
                         <div key={pi} className="flex items-center space-x-2 mb-1">
-                          <span className="text-xs text-gray-400 w-10">{t.labelOrder}</span>
+                          <span className="text-xs text-black w-10">{t.labelOrder}</span>
                           <SearchableSelect value={pair.orderCol} options={orderColumns}
                             onChange={v => updateMatchPair(aux.id, pi, 'orderCol', v)}
                             placeholder={t.placeholderSelectCol} disabled={isExecuting} />
-                          <span className="text-gray-400 text-xs">↔</span>
-                          <span className="text-xs text-gray-400 w-10">{t.labelAux}</span>
+                          <span className="text-black text-xs">↔</span>
+                          <span className="text-xs text-black w-10">{t.labelAux}</span>
                           <SearchableSelect value={pair.auxCol} options={auxCols}
                             onChange={v => updateMatchPair(aux.id, pi, 'auxCol', v)}
                             placeholder={t.placeholderSelectCol} disabled={isExecuting} />
                           {aux.matchPairs.length > 1 && (
                             <button onClick={() => handleRemoveMatchPair(aux.id, pi)} disabled={isExecuting}
-                              className="p-1 text-gray-300 hover:text-red-500 text-xs">✕</button>
+                              className="px-1.5 py-0.5 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100">✕</button>
                           )}
                         </div>
                       ))}
                       <button onClick={() => handleAddMatchPair(aux.id)} disabled={isExecuting}
-                        className="text-xs text-blue-500 hover:text-blue-600 mt-1">{t.btnAddMatchField}</button>
+                        className="text-xs text-black hover:text-black mt-1">{t.btnAddMatchField}</button>
                     </div>
                   </div>
                 )
@@ -1147,14 +1147,14 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
         {/* Step 1 — 操作按钮 */}
         <div className="flex items-center space-x-3 mb-4">
           {step1Done && (
-            <span className="text-sm text-green-600 flex items-center">
+            <span className="text-sm text-black flex items-center">
               <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
               {t.step1DoneLabel}
             </span>
           )}
           <div className="flex-1" />
           <button onClick={handleSaveStep1Preset} disabled={isExecuting || !project}
-            className="px-3 py-2 text-sm border border-blue-300 text-blue-600 rounded-lg hover:bg-blue-50 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+            className="px-3 py-2 text-sm bg-primary-800 text-white rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
             </svg>
@@ -1167,9 +1167,9 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
             {/* 当前阶段 */}
             {executePhase && (
-              <div className="text-sm text-gray-700 font-medium mb-2">
+              <div className="text-sm text-black font-medium mb-2">
                 {step1Executing && (
-                  <svg className="animate-spin h-4 w-4 inline mr-2 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <svg className="animate-spin h-4 w-4 inline mr-2 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
@@ -1181,12 +1181,12 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
             {/* 合并进度条 */}
             {step1Executing && mergeProgress && (
               <>
-                <div className="flex justify-between text-xs text-gray-600 mb-1">
+                <div className="flex justify-between text-xs text-black mb-1">
                   <span>{mergeProgress.step || ''}</span>
-                  <span className="font-medium text-blue-600">{mergeProgress.overallProgress || 0}%</span>
+                  <span className="font-medium text-black">{mergeProgress.overallProgress || 0}%</span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2 mb-2 overflow-hidden">
-                  <div className="bg-green-500 h-2 rounded-full transition-all duration-300" style={{ width: `${mergeProgress?.overallProgress || 0}%` }} />
+                  <div className="bg-primary-800 h-2 rounded-full transition-all duration-300" style={{ width: `${mergeProgress?.overallProgress || 0}%` }} />
                 </div>
               </>
             )}
@@ -1208,39 +1208,39 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
 
             {/* 合并结果统计 */}
             {mergeResult && !step1Executing && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="bg-primary-800 border border-blue-200 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-semibold text-blue-700">
+                  <span className="text-sm font-semibold text-white">
                     <svg className="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     {t.step1DoneLabel}
                   </span>
                   <button onClick={() => window.electronAPI.shell.openPath(mergeResult.outputPath)}
-                    className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">{t.btnOpenOutput}</button>
+                    className="px-3 py-1 text-xs bg-primary-700 text-white rounded hover:bg-primary-600">{t.btnOpenOutput}</button>
                 </div>
                 <div className="grid grid-cols-4 gap-3 mb-3">
                   <div className="bg-white rounded p-2 text-center">
-                    <p className="text-lg font-bold text-blue-600">{mergeResult.totalRows}</p>
-                    <p className="text-xs text-blue-600">{t.statTotalRows}</p>
+                    <p className="text-lg font-bold text-black">{mergeResult.totalRows}</p>
+                    <p className="text-xs text-black">{t.statTotalRows}</p>
                   </div>
                   <div className="bg-white rounded p-2 text-center">
-                    <p className="text-lg font-bold text-blue-600">{mergeResult.totalColumns}</p>
-                    <p className="text-xs text-blue-600">{t.statTotalCols}</p>
+                    <p className="text-lg font-bold text-black">{mergeResult.totalColumns}</p>
+                    <p className="text-xs text-black">{t.statTotalCols}</p>
                   </div>
                   <div className="bg-white rounded p-2 text-center">
-                    <p className="text-lg font-bold text-green-600">{mergeResult.matchedCount}</p>
-                    <p className="text-xs text-green-600">{t.statMatchedRows}</p>
+                    <p className="text-lg font-bold text-black">{mergeResult.matchedCount}</p>
+                    <p className="text-xs text-black">{t.statMatchedRows}</p>
                   </div>
                   <div className="bg-white rounded p-2 text-center">
-                    <p className="text-lg font-bold text-amber-600">{mergeResult.unmatchedCount}</p>
-                    <p className="text-xs text-amber-600">{t.statUnmatchedRows}</p>
+                    <p className="text-lg font-bold text-black">{mergeResult.unmatchedCount}</p>
+                    <p className="text-xs text-black">{t.statUnmatchedRows}</p>
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-blue-800 mb-1">{t.statOutputFile}</div>
+                  <div className="text-xs text-white mb-1">{t.statOutputFile}</div>
                   <button onClick={() => window.electronAPI.shell.openPath(mergeResult.outputPath)}
-                    className="text-xs text-blue-600 hover:text-blue-800 truncate block max-w-xs">
+                    className="text-xs text-white hover:text-white truncate block max-w-xs">
                     {mergeResult.outputPath}
                   </button>
                 </div>
@@ -1253,61 +1253,61 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       {/* ══════════════════════════════════════════════════════
           第二步：生成导入金蝶的汇总表
           ══════════════════════════════════════════════════════ */}
-      <div className="bg-white rounded-lg border-2 border-green-200 p-4">
-        <h2 className="text-base font-semibold text-green-700 mb-4 flex items-center">
-          <span className="w-6 h-6 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-xs font-bold mr-2">2</span>
+      <div className="bg-white rounded-lg border-2 border-blue-200 p-4">
+        <h2 className="text-base font-semibold text-black mb-4 flex items-center">
+          <span className="w-6 h-6 bg-primary-800 text-white rounded-full flex items-center justify-center text-xs font-bold mr-2">2</span>
           {t.step2Title}
         </h2>
 
         {/* 模板表 & 输出配置 */}
         <div className="bg-white rounded-lg border-2 border-gray-100 p-4 mb-4">
-          <h3 className="text-sm font-semibold text-gray-800 mb-4">{t.sectionOutputConfig}</h3>
+          <h3 className="text-sm font-semibold text-black mb-4">{t.sectionOutputConfig}</h3>
           <div className="space-y-3">
             <div ref={table2DropRef}
               className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-colors ${
-                table2DragOver ? 'border-blue-400 bg-blue-50 border-dashed' : 'border-gray-200'
+                table2DragOver ? 'border-primary-400 bg-primary-800 border-dashed' : 'border-gray-200'
               }`}>
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">{t.labelTemplateTable}</label>
+              <label className="text-sm text-black w-32 flex-shrink-0">{t.labelTemplateTable}</label>
               <button onClick={handleSelectTable2} disabled={isExecuting}
-                className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">{t.btnSelectFile}</button>
-              <span className="text-sm text-gray-500 truncate flex-1">{table2Path || t.placeholderDragOrClick}</span>
+                className="px-3 py-1.5 text-sm bg-primary-800 text-white rounded hover:bg-primary-700 disabled:cursor-not-allowed">{t.btnSelectFile}</button>
+              <span className="text-sm text-black truncate flex-1">{table2Path || t.placeholderDragOrClick}</span>
             </div>
             <div className="flex items-center space-x-3 p-3 rounded-lg border-2 border-gray-200">
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">{t.labelOutputDir}</label>
+              <label className="text-sm text-black w-32 flex-shrink-0">{t.labelOutputDir}</label>
               <input type="text" value={outputDir} onClick={handleSelectOutputDir} readOnly
                 disabled={isExecuting}
-                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50 cursor-pointer"
+                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50 cursor-pointer"
                 placeholder={t.placeholderSelectDir} />
             </div>
             <div className="flex items-center space-x-3 p-3 rounded-lg border-2 border-gray-200">
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">{t.labelOutputPrefix}</label>
+              <label className="text-sm text-black w-32 flex-shrink-0">{t.labelOutputPrefix}</label>
               <input type="text" value={outputPrefix} onChange={e => setOutputPrefix(e.target.value)}
                 disabled={isExecuting}
-                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
+                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
             </div>
           </div>
         </div>
 
         {/* 客户订单拆分字段配置 */}
         <div className="bg-white rounded-lg border-2 border-gray-200 p-4 mb-4">
-          <h3 className="text-sm font-semibold text-gray-800 mb-3">{t.sectionSplitConfig}</h3>
+          <h3 className="text-sm font-semibold text-black mb-3">{t.sectionSplitConfig}</h3>
           <div className="space-y-3">
             <div className="flex items-center space-x-3">
-              <label className="text-sm text-gray-600 w-28 flex-shrink-0">{t.labelGroupByColumn}</label>
+              <label className="text-sm text-black w-28 flex-shrink-0">{t.labelGroupByColumn}</label>
               <div className="flex-1">
                 <SearchableSelect value={groupByColumn} options={orderColumns} onChange={setGroupByColumn}
                   placeholder={t.placeholderSelectCol} disabled={isExecuting} />
               </div>
             </div>
             <div className="flex items-center space-x-3">
-              <label className="text-sm text-gray-600 w-28 flex-shrink-0">{t.labelMatchFieldTable}</label>
+              <label className="text-sm text-black w-28 flex-shrink-0">{t.labelMatchFieldTable}</label>
               <div className="flex-1">
                 <SearchableSelect value={matchFieldTable1} options={table1Columns} onChange={setMatchFieldTable1}
                   placeholder={t.selectPlaceholder} disabled={isExecuting} />
               </div>
             </div>
             <div className="flex items-center space-x-3">
-              <label className="text-sm text-gray-600 w-28 flex-shrink-0">{t.labelMatchFieldTemplate}</label>
+              <label className="text-sm text-black w-28 flex-shrink-0">{t.labelMatchFieldTemplate}</label>
               <div className="flex-1">
                 <SearchableSelect value={matchFieldTable2} options={templateColumns} onChange={setMatchFieldTable2}
                   placeholder={t.selectPlaceholder} disabled={isExecuting} />
@@ -1318,30 +1318,30 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
 
         {/* 表格字段配置 */}
         <div className="bg-white rounded-lg border border-gray-100 p-4 mb-4">
-          <h3 className="text-sm font-semibold text-gray-800 mb-4">{t.sectionFieldConfig}</h3>
+          <h3 className="text-sm font-semibold text-black mb-4">{t.sectionFieldConfig}</h3>
 
           <div className="space-y-3 mb-4">
             <div className="flex items-center space-x-3">
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">{t.labelTemplateHeaderRow}</label>
+              <label className="text-sm text-black w-32 flex-shrink-0">{t.labelTemplateHeaderRow}</label>
               <input type="number" value={templateHeaderRowIndex}
                 onChange={e => handleHeaderRowChange(parseInt(e.target.value) || 0)}
                 disabled={isExecuting}
-                className="max-w-64 flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
+                className="max-w-64 flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
             </div>
             <div className="flex items-center space-x-3">
-              <label className="text-sm text-gray-600 w-32 flex-shrink-0">{t.labelDate}</label>
+              <label className="text-sm text-black w-32 flex-shrink-0">{t.labelDate}</label>
               <input type="date" value={date} onChange={e => setDate(e.target.value)}
                 disabled={isExecuting}
-                className="max-w-64 flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
+                className="max-w-64 flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
             </div>
           </div>
 
           {/* 序号自增配置 */}
           <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t.sectionAutoInc}</p>
+              <p className="text-xs font-semibold text-black uppercase tracking-wider">{t.sectionAutoInc}</p>
               <button onClick={handleAddSeq} disabled={isExecuting}
-                className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50">{t.btnAdd}</button>
+                className="px-2 py-1 text-xs bg-primary-800 text-white rounded hover:bg-primary-700 disabled:cursor-not-allowed">{t.btnAdd}</button>
             </div>
             <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollSnapType: 'x mandatory' }}>
               {seqConfigs.map((cfg, idx) => (
@@ -1350,18 +1350,18 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                   onDragStart={() => setDraggedSeqId(cfg.id)}
                   onDragOver={e => { e.preventDefault(); if (draggedSeqId && draggedSeqId !== cfg.id) { const from = seqConfigs.findIndex(c => c.id === draggedSeqId); if (from >= 0) handleReorderSeq(from, idx); setDraggedSeqId(cfg.id) } }}
                   onDragEnd={() => setDraggedSeqId(null)}
-                  className={`flex-shrink-0 bg-white rounded-lg border p-3 transition-all duration-150 ${draggedSeqId === cfg.id ? 'border-blue-600 shadow-lg ring-2 ring-blue-300 opacity-80 scale-[1.02]' : 'border-gray-200 hover:border-blue-200'}`}
+                  className={`flex-shrink-0 bg-white rounded-lg border p-3 transition-all duration-150 ${draggedSeqId === cfg.id ? 'border-primary-600 shadow-lg ring-2 ring-primary-300 opacity-80 scale-[1.02]' : 'border-gray-200 hover:border-primary-200'}`}
                   style={{ minWidth: 260, maxWidth: 280, scrollSnapAlign: 'start' }}>
                   <div className="flex items-center justify-between mb-2">
                     <input type="text" value={cfg.name} onChange={e => handleUpdateSeq(cfg.id, 'name', e.target.value)}
                       disabled={isExecuting}
-                      className="flex-1 text-xs font-semibold text-blue-700 bg-transparent border-b border-dashed border-blue-200 focus:outline-none focus:border-blue-500 disabled:opacity-50 mr-2" />
+                      className="flex-1 text-xs font-semibold text-primary-700 bg-transparent border-b border-dashed border-blue-200 focus:outline-none focus:border-primary-500 disabled:cursor-not-allowed mr-2" />
                     <button onClick={() => handleDeleteSeq(cfg.id)} disabled={isExecuting || seqConfigs.length <= 1}
-                      className="text-xs text-red-400 hover:text-red-600 disabled:opacity-30 flex-shrink-0">✕</button>
+                      className="px-1.5 py-0.5 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 disabled:cursor-not-allowed flex-shrink-0">✕</button>
                   </div>
                   <select value={cfg.type} onChange={e => handleUpdateSeq(cfg.id, 'type', e.target.value)}
                     disabled={isExecuting}
-                    className="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50 mb-2">
+                    className="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50 mb-2">
                     <option value="constant">{t.sourceConstant}</option>
                     <option value="sequential">{t.autoIncRuleStep}</option>
                     <option value="fieldBased">{t.labelBaseField}</option>
@@ -1369,37 +1369,37 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                   {cfg.type === 'constant' && (
                     <input type="text" value={cfg.constantValue} onChange={e => handleUpdateSeq(cfg.id, 'constantValue', e.target.value)}
                       disabled={isExecuting} placeholder={t.placeholderConstant}
-                      className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
+                      className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
                   )}
                   {cfg.type === 'sequential' && (
                     <>
-                      <label className="text-xs text-gray-500 block mb-1">{t.labelBillNoStart}</label>
+                      <label className="text-xs text-black block mb-1">{t.labelBillNoStart}</label>
                       <input type="number" value={cfg.start} onChange={e => handleUpdateSeq(cfg.id, 'start', parseInt(e.target.value) || 0)}
                         disabled={isExecuting}
-                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50 mb-2" />
-                      <label className="text-xs text-gray-500 block mb-1">{t.labelBillNoStep}</label>
+                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50 mb-2" />
+                      <label className="text-xs text-black block mb-1">{t.labelBillNoStep}</label>
                       <input type="number" min="1" value={cfg.step} onChange={e => handleUpdateSeq(cfg.id, 'step', Math.max(1, parseInt(e.target.value) || 1))}
                         disabled={isExecuting}
-                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
+                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
                     </>
                   )}
                   {cfg.type === 'fieldBased' && (
                     <>
-                      <label className="text-xs text-gray-500 block mb-1">{t.labelBaseField}</label>
+                      <label className="text-xs text-black block mb-1">{t.labelBaseField}</label>
                       <select value={cfg.baseField} onChange={e => handleUpdateSeq(cfg.id, 'baseField', e.target.value)}
                         disabled={isExecuting || orderColumns.length === 0}
-                        className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50 mb-2">
+                        className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50 mb-2">
                         <option value="">{t.placeholderSelectCol}</option>
                         {orderColumns.map(col => <option key={col} value={col}>{col}</option>)}
                       </select>
-                      <label className="text-xs text-gray-500 block mb-1">{t.labelBillNoStart}</label>
+                      <label className="text-xs text-black block mb-1">{t.labelBillNoStart}</label>
                       <input type="number" value={cfg.start} onChange={e => handleUpdateSeq(cfg.id, 'start', parseInt(e.target.value) || 0)}
                         disabled={isExecuting}
-                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50 mb-2" />
-                      <label className="text-xs text-gray-500 block mb-1">{t.labelBillNoStep}</label>
+                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50 mb-2" />
+                      <label className="text-xs text-black block mb-1">{t.labelBillNoStep}</label>
                       <input type="number" min="1" value={cfg.step} onChange={e => handleUpdateSeq(cfg.id, 'step', Math.max(1, parseInt(e.target.value) || 1))}
                         disabled={isExecuting}
-                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
+                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
                     </>
                   )}
                 </div>
@@ -1410,9 +1410,9 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           {/* 字段映射 — 数据表取值 */}
           <div className="mb-4">
             <div className="flex items-center space-x-3 mb-3">
-              <span className="text-sm font-medium text-gray-700">{t.sectionFieldMappingData}</span>
+              <span className="text-sm font-medium text-primary-700">{t.sectionFieldMappingData}</span>
               <button onClick={() => handleAddMapping('table1')} disabled={isExecuting}
-                className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50">{t.btnAddMappingData}</button>
+                className="px-3 py-1.5 text-sm bg-primary-800 text-white rounded hover:bg-primary-700 disabled:cursor-not-allowed">{t.btnAddMappingData}</button>
             </div>
             <div className="space-y-2">
               {fieldMappings.filter(m => m.sourceType === 'table1').map((mapping, idx, arr) => (
@@ -1422,32 +1422,32 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                   onDragOver={e => { e.preventDefault(); setDraggedMappingId(prev => prev || mapping.id) }}
                   onDrop={e => { e.preventDefault(); if (draggedMappingId && draggedMappingId !== mapping.id) { const fromIdx = arr.findIndex(m => m.id === draggedMappingId); if (fromIdx >= 0) reorderMappings('table1', fromIdx, idx) }; setDraggedMappingId(null) }}
                   onDragEnd={() => setDraggedMappingId(null)}
-                  className={`border-2 rounded p-3 bg-white cursor-default transition-all duration-150 ${draggedMappingId === mapping.id ? 'border-blue-600 shadow-lg ring-2 ring-blue-300 opacity-80 scale-[1.02]' : 'border border-gray-200 hover:border-blue-200'}`}>
+                  className={`border-2 rounded p-3 bg-white cursor-default transition-all duration-150 ${draggedMappingId === mapping.id ? 'border-primary-600 shadow-lg ring-2 ring-primary-300 opacity-80 scale-[1.02]' : 'border border-gray-200 hover:border-primary-200'}`}>
                   <div className="flex items-start space-x-3">
-                    <div className="flex items-center self-start pt-2 text-gray-300 cursor-grab active:cursor-grabbing">
+                    <div className="flex items-center self-start pt-2 text-black cursor-grab active:cursor-grabbing">
                       <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM8 14a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM8 22a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>
                     </div>
                     <div className="flex-1">
-                      <label className="text-xs text-gray-500 block mb-1">{t.labelTemplateCol}</label>
+                      <label className="text-xs text-black block mb-1">{t.labelTemplateCol}</label>
                       <SearchableSelect value={mapping.templateCol} options={templateColumns}
                         onChange={val => handleUpdateMapping(mapping.id, 'templateCol', val)}
                         placeholder={t.selectPlaceholder} disabled={isExecuting} />
                     </div>
                     <div className="flex-1">
-                      <label className="text-xs text-gray-500 block mb-1">{t.labelDataTableCol}</label>
+                      <label className="text-xs text-black block mb-1">{t.labelDataTableCol}</label>
                       <SearchableSelect value={mapping.table1Col || ''} options={table1Columns}
                         onChange={val => handleUpdateMapping(mapping.id, 'table1Col', val)}
                         placeholder={t.selectPlaceholder} disabled={isExecuting} />
                     </div>
                     <div className="w-24 flex-shrink-0 pt-5">
                       <button onClick={() => handleDeleteMapping(mapping.id)} disabled={isExecuting}
-                        className="px-3 py-1.5 text-sm bg-red-100 text-red-600 rounded hover:bg-red-200 disabled:opacity-50">{t.btnDelete}</button>
+                        className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 disabled:cursor-not-allowed">{t.btnDelete}</button>
                     </div>
                   </div>
                 </div>
               ))}
               {fieldMappings.filter(m => m.sourceType === 'table1').length === 0 && (
-                <p className="text-xs text-gray-400 text-center py-3">{t.noMappingsData}</p>
+                <p className="text-xs text-black text-center py-3">{t.noMappingsData}</p>
               )}
             </div>
           </div>
@@ -1455,9 +1455,9 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           {/* 字段映射 — 非数据表取值 */}
           <div className="mb-4">
             <div className="flex items-center space-x-3 mb-3">
-              <span className="text-sm font-medium text-gray-700">{t.sectionFieldMappingOther}</span>
+              <span className="text-sm font-medium text-primary-700">{t.sectionFieldMappingOther}</span>
               <button onClick={() => handleAddMapping('constant')} disabled={isExecuting}
-                className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50">{t.btnAddMappingOther}</button>
+                className="px-3 py-1.5 text-sm bg-primary-800 text-white rounded hover:bg-primary-700 disabled:cursor-not-allowed">{t.btnAddMappingOther}</button>
             </div>
             <div className="space-y-2">
               {fieldMappings.filter(m => m.sourceType !== 'table1').map((mapping, idx, arr) => (
@@ -1467,43 +1467,43 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                   onDragOver={e => { e.preventDefault(); setDraggedMappingId(prev => prev || mapping.id) }}
                   onDrop={e => { e.preventDefault(); if (draggedMappingId && draggedMappingId !== mapping.id) { const fromIdx = arr.findIndex(m => m.id === draggedMappingId); if (fromIdx >= 0) reorderMappings('other', fromIdx, idx) }; setDraggedMappingId(null) }}
                   onDragEnd={() => setDraggedMappingId(null)}
-                  className={`border-2 rounded p-3 bg-white cursor-default transition-all duration-150 ${draggedMappingId === mapping.id ? 'border-blue-600 shadow-lg ring-2 ring-blue-300 opacity-80 scale-[1.02]' : 'border border-gray-200 hover:border-blue-200'}`}>
+                  className={`border-2 rounded p-3 bg-white cursor-default transition-all duration-150 ${draggedMappingId === mapping.id ? 'border-primary-600 shadow-lg ring-2 ring-primary-300 opacity-80 scale-[1.02]' : 'border border-gray-200 hover:border-primary-200'}`}>
                   <div className="flex items-start space-x-3">
-                    <div className="flex items-center self-start pt-2 text-gray-300 cursor-grab active:cursor-grabbing">
+                    <div className="flex items-center self-start pt-2 text-black cursor-grab active:cursor-grabbing">
                       <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM8 14a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM8 22a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>
                     </div>
                     <div className="flex-1">
-                      <label className="text-xs text-gray-500 block mb-1">{t.labelTemplateCol}</label>
+                      <label className="text-xs text-black block mb-1">{t.labelTemplateCol}</label>
                       <SearchableSelect value={mapping.templateCol} options={templateColumns}
                         onChange={val => handleUpdateMapping(mapping.id, 'templateCol', val)}
                         placeholder={t.selectPlaceholder} disabled={isExecuting} />
                     </div>
                     <div className="flex-1">
-                      <label className="text-xs text-gray-500 block mb-1">{t.labelSourceType}</label>
+                      <label className="text-xs text-black block mb-1">{t.labelSourceType}</label>
                       <select value={mapping.sourceType} onChange={e => handleUpdateMapping(mapping.id, 'sourceType', e.target.value)}
                         disabled={isExecuting}
-                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50">
+                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50">
                         {sourceTypeOptions.filter(o => o.value !== 'table1').map(opt => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
                       </select>
                     </div>
                     <div className="w-24 flex-shrink-0 pt-5">
                       <button onClick={() => handleDeleteMapping(mapping.id)} disabled={isExecuting}
-                        className="px-3 py-1.5 text-sm bg-red-100 text-red-600 rounded hover:bg-red-200 disabled:opacity-50">{t.btnDelete}</button>
+                        className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 disabled:cursor-not-allowed">{t.btnDelete}</button>
                     </div>
                   </div>
                   {mapping.sourceType === 'constant' && (
                     <div className="mt-3">
-                      <label className="text-xs text-gray-500 block mb-1">{t.labelConstantValue}</label>
+                      <label className="text-xs text-black block mb-1">{t.labelConstantValue}</label>
                       <input type="text" value={mapping.constantValue || ''}
                         onChange={e => handleUpdateMapping(mapping.id, 'constantValue', e.target.value)}
                         disabled={isExecuting}
-                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:bg-gray-50" />
+                        className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
                     </div>
                   )}
                 </div>
               ))}
               {fieldMappings.filter(m => m.sourceType !== 'table1').length === 0 && (
-                <p className="text-xs text-gray-400 text-center py-3">{t.noMappingsOther}</p>
+                <p className="text-xs text-black text-center py-3">{t.noMappingsOther}</p>
               )}
             </div>
           </div>
@@ -1511,7 +1511,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           {/* 文本格式列（暂隐藏） */}
           {/* <div className="mb-4">
             <div className="flex items-center space-x-3 mb-3">
-              <span className="text-sm font-medium text-gray-700">{t.sectionTextFormat}</span>
+              <span className="text-sm font-medium text-black">{t.sectionTextFormat}</span>
             </div>
             <div className="flex items-center space-x-3 mb-2">
               <div className="w-56">
@@ -1520,14 +1520,14 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                   placeholder={t.selectPlaceholder} disabled={isExecuting} />
               </div>
               <button onClick={handleAddTextCol} disabled={isExecuting || !newKingdeeTextCol}
-                className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50">{t.btnAdd}</button>
+                className="px-3 py-1.5 text-sm bg-primary-50 text-black rounded hover:bg-primary-100 disabled:cursor-not-allowed">{t.btnAdd}</button>
             </div>
             <div className="flex flex-wrap gap-2">
               {kingdeeTextCols.map(col => (
-                <span key={col} className="inline-flex items-center px-2.5 py-1 text-xs bg-gray-100 text-gray-700 rounded">
+                <span key={col} className="inline-flex items-center px-2.5 py-1 text-xs bg-gray-100 text-black rounded">
                   {col}
                   <button onClick={() => handleRemoveKingdeeTextCol(col)} disabled={isExecuting}
-                    className="ml-2 text-gray-400 hover:text-gray-600">×</button>
+                    className="ml-2 text-black hover:text-black">×</button>
                 </span>
               ))}
             </div>
@@ -1536,9 +1536,9 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
 
         {/* Step 2 — 操作按钮 */}
         <div className="flex items-center space-x-3 mb-4">
-          {!step1Done && <span className="text-sm text-gray-400">{t.needStep1First}</span>}
+          {!step1Done && <span className="text-sm text-black">{t.needStep1First}</span>}
           {finalResult && !step2Executing && (
-            <span className="text-sm text-green-600 flex items-center">
+            <span className="text-sm text-black flex items-center">
               <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
               {t.step2DoneLabel}
             </span>
@@ -1546,12 +1546,12 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           <div className="flex-1" />
           {/* 隐藏：加载推荐预设
           <button onClick={handleLoadRecommended} disabled={isExecuting}
-            className="px-3 py-2 text-sm border border-amber-300 text-amber-600 rounded-lg hover:bg-amber-50 shadow-sm disabled:opacity-50">
+            className="px-3 py-2 text-sm bg-primary-50 text-black rounded-lg hover:bg-primary-100 shadow-sm disabled:cursor-not-allowed">
             {t.btnLoadPreset}
           </button>
           */}
           <button onClick={handleSaveStep2Preset} disabled={isExecuting || !project}
-            className="px-3 py-2 text-sm border border-green-300 text-green-600 rounded-lg hover:bg-green-50 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+            className="px-3 py-2 text-sm bg-primary-800 text-white rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
             </svg>
@@ -1564,8 +1564,8 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
             {/* 当前阶段 */}
             {executePhase && step2Executing && (
-              <div className="text-sm text-gray-700 font-medium mb-2">
-                <svg className="animate-spin h-4 w-4 inline mr-2 text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <div className="text-sm text-black font-medium mb-2">
+                <svg className="animate-spin h-4 w-4 inline mr-2 text-primary-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
@@ -1587,34 +1587,34 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
 
             {/* 最终结果 */}
             {finalResult && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <div className="bg-primary-800 border border-blue-200 rounded-lg p-4">
                 {finalResult.fallbackWarning && (
-                  <div className="mb-2 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">{finalResult.fallbackWarning}</div>
+                  <div className="mb-2 text-xs text-black bg-amber-50 px-2 py-1 rounded">{finalResult.fallbackWarning}</div>
                 )}
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-semibold text-green-700">
+                  <span className="text-sm font-semibold text-white">
                     <svg className="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     {t.resultStep2DoneOutput}
                   </span>
                   <button onClick={handleOpenFinalOutput}
-                    className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">{t.btnOpenOutput}</button>
+                    className="px-3 py-1 text-xs bg-primary-700 text-white rounded hover:bg-primary-600">{t.btnOpenOutput}</button>
                 </div>
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   <div className="bg-white rounded p-2 text-center">
-                    <p className="text-lg font-bold text-green-600">{finalResult.totalOrders}</p>
-                    <p className="text-xs text-green-600">{t.statSplitOrders}</p>
+                    <p className="text-lg font-bold text-black">{finalResult.totalOrders}</p>
+                    <p className="text-xs text-black">{t.statSplitOrders}</p>
                   </div>
                   <div className="bg-white rounded p-2 text-center">
-                    <p className="text-lg font-bold text-amber-600">{finalResult.totalRows}</p>
-                    <p className="text-xs text-amber-600">{t.statOutputRows}</p>
+                    <p className="text-lg font-bold text-black">{finalResult.totalRows}</p>
+                    <p className="text-xs text-black">{t.statOutputRows}</p>
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-green-800 mb-1">{t.statOutputFile}</div>
+                  <div className="text-xs text-white mb-1">{t.statOutputFile}</div>
                   <button onClick={() => window.electronAPI.shell.openPath(finalResult.outputPath)}
-                    className="text-xs text-green-600 hover:text-green-800 truncate block max-w-xs">
+                    className="text-xs text-white hover:text-white truncate block max-w-xs">
                     {finalResult.outputPath}
                   </button>
                 </div>

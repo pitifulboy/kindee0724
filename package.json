@@ -1,6 +1,6 @@
 {
   "name": "electron-office",
-  "version": "3.2.2",
+  "version": "3.3.5",
   "description": "Electron离线办公工具软件",
   "main": "./dist-electron/main/index.js",
   "author": "Your Name",

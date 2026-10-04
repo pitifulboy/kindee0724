@@ -137,7 +137,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* 左侧拖拽手柄 */}
       <div
         className={`absolute left-0 top-0 bottom-0 w-1 z-20 cursor-col-resize transition-colors ${
-          isResizing ? 'bg-blue-500' : 'hover:bg-blue-400'
+          isResizing ? 'bg-primary-500' : 'hover:bg-primary-400'
         }`}
         onMouseDown={() => setIsResizing(true)}
       />
@@ -145,9 +145,9 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* 项目列表 */}
       <nav className="flex-1 px-3 py-4 overflow-y-auto">
         <div className="flex items-center justify-between mb-3 px-2">
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{t.projectListTitle}</p>
+          <p className="text-[10px] font-semibold text-black uppercase tracking-wider">{t.projectListTitle}</p>
           <button onClick={onAddProject}
-            className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+            className="p-1 text-black hover:text-white hover:bg-primary-700 rounded transition-colors"
             title={t.newProjectTitle}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -156,9 +156,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {projects.length === 0 && (
-          <p className="text-xs text-gray-400 text-center py-6 px-2">
+          <p className="text-xs text-black text-center py-6 px-2">
             {t.emptyProjectHint}<br />
-            <span className="text-gray-300">{t.emptyProjectAction}</span>
+            <span className="text-black">{t.emptyProjectAction}</span>
           </p>
         )}
 
@@ -174,7 +174,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               <div
                 key={project.id}
                 className={`group relative flex items-center rounded-lg transition-colors ${
-                  isActive ? 'bg-blue-50 ring-1 ring-blue-200' : 'hover:bg-gray-50'
+                  isActive ? 'bg-primary-800 ring-1 ring-primary-200' : 'hover:bg-gray-50'
                 }`}
               >
                 {isEditing ? (
@@ -184,7 +184,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onChange={e => setEditName(e.target.value)}
                     onBlur={handleFinishRename}
                     onKeyDown={handleKeyDown}
-                    className="flex-1 mx-2 my-1.5 px-3 py-2 text-sm bg-white border border-blue-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    className="flex-1 mx-2 my-1.5 px-3 py-2 text-sm bg-white border border-primary-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-400"
                     autoFocus
                     onClick={e => e.stopPropagation()}
                   />
@@ -195,17 +195,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                     className="flex-1 flex items-center px-3 py-2.5 text-left min-w-0"
                   >
                     {/* 项目图标 */}
-                    <svg className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-600' : 'text-gray-400'}`}
+                    <svg className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-white' : 'text-black'}`}
                       fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                         d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                     </svg>
                     <div className="ml-2.5 flex-1 min-w-0">
-                      <p className={`text-sm truncate ${isActive ? 'font-medium text-blue-700' : 'text-gray-700'}`} title={project.name}>
+                      <p className={`text-sm truncate ${isActive ? 'font-medium text-white' : 'text-black'}`} title={project.name}>
                         {project.name}
                       </p>
                       {lastModified && (
-                        <p className="text-[10px] text-gray-400">{lastModified}</p>
+                        <p className="text-[10px] text-white">{lastModified}</p>
                       )}
                     </div>
                   </button>
@@ -216,7 +216,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <div className="flex items-center pr-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                     <button
                       onClick={(e) => { e.stopPropagation(); handleStartRename(project.id, project.name) }}
-                      className="p-1.5 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-md"
+                      className="p-1.5 text-black hover:text-white hover:bg-primary-700 rounded-md"
                       title={t.renameTitle}
                     >
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -226,7 +226,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); onDeleteProject(project.id) }}
-                      className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-md"
+                      className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md"
                       title={t.deleteTitle}
                     >
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -243,23 +243,23 @@ const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       {/* 底部 — 导入 / 导出 */}
-      <div ref={dropRef} className={`px-3 py-3 border-t border-gray-50 space-y-1.5 transition-colors ${draggingOver ? 'bg-blue-50 border-blue-300' : ''}`}>
+      <div ref={dropRef} className={`px-3 py-3 border-t border-gray-50 space-y-1.5 transition-colors ${draggingOver ? 'bg-primary-800 border-primary-300' : ''}`}>
         {draggingOver && (
-          <div className="text-[11px] text-blue-600 font-medium text-center mb-1">
+          <div className="text-[11px] text-black font-medium text-center mb-1">
             {t.importFromFileHint}
           </div>
         )}
         <div className="flex items-center space-x-1.5">
-          <div className="w-2 h-2 rounded-full bg-green-400" />
-          <span className="text-[11px] text-gray-400">{appText.statusRunning}</span>
+          <div className="w-2 h-2 rounded-full bg-primary-500" />
+          <span className="text-[11px] text-black">{appText.statusRunning}</span>
           <div className="flex-1" />
-          <span className="text-[11px] text-gray-300">{appText.version}</span>
+          <span className="text-[11px] text-black">{appText.version}</span>
         </div>
         <div className="flex space-x-1">
           <button
             onClick={onImportProjects}
             disabled={isImporting}
-            className="flex-1 flex items-center justify-center px-2 py-1.5 text-[11px] text-gray-500 border border-gray-200 rounded hover:bg-gray-50 hover:text-blue-600 disabled:opacity-50 transition-colors"
+            className="flex-1 flex items-center justify-center px-2 py-1.5 text-[11px] text-black border border-gray-200 rounded hover:bg-gray-50 hover:text-black disabled:cursor-not-allowed transition-colors"
             title={t.importPresetTitle}>
             <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -269,7 +269,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={onExportProjects}
             disabled={isImporting}
-            className="flex-1 flex items-center justify-center px-2 py-1.5 text-[11px] text-gray-500 border border-gray-200 rounded hover:bg-gray-50 hover:text-blue-600 disabled:opacity-50 transition-colors"
+            className="flex-1 flex items-center justify-center px-2 py-1.5 text-[11px] text-black border border-gray-200 rounded hover:bg-gray-50 hover:text-black disabled:cursor-not-allowed transition-colors"
             title={t.exportPresetTitle}>
             <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -288,9 +288,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         >
           <button
             onClick={handleCopyFromMenu}
-            className="w-full flex items-center px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors text-left"
+            className="w-full flex items-center px-3 py-2 text-sm text-black hover:bg-primary-700 hover:text-white transition-colors text-left"
           >
-            <svg className="w-4 h-4 mr-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 mr-2 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
             {t.copyProject}
