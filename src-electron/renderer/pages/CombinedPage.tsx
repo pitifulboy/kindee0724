@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import SearchableSelect from '../components/SearchableSelect'
+import FolderMergeView from '../components/visualization/FolderMergeView'
+import LeftJoinModelView from '../components/visualization/LeftJoinModelView'
+import SplitOrderView from '../components/visualization/SplitOrderView'
 import { combinedPage as t, app as appText } from '../config/appText'
 
 // ═══════════════════════════════════════════════════════════════
@@ -144,8 +147,17 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
     totalRows: number
     fallbackWarning?: string
   } | null>(null)
-  const isExecuting = step1Executing || step2Executing
   const [isRunAll, setIsRunAll] = useState(false)
+
+  // ─── 分步执行（S3~S6）：仅新增渲染层中间产物状态，后端调用与参数完全不变 ───
+  const [s3Executing, setS3Executing] = useState(false)
+  const [s4Executing, setS4Executing] = useState(false)
+  const [s5Executing, setS5Executing] = useState(false)
+  const [s6Executing, setS6Executing] = useState(false)
+  const [s3Result, setS3Result] = useState<{ outputPath: string } | null>(null)
+  const [s4Dir, setS4Dir] = useState('')            // S4 产物目录（step2b 输出），作为 S5 的输入
+  const [s5FilledFiles, setS5FilledFiles] = useState<{ filePath: string }[]>([]) // S5 产物（step2d 填充文件）
+  const isExecuting = step1Executing || step2Executing || s3Executing || s4Executing || s5Executing || s6Executing
 
   // 拖拽区域 ref（订单文件）
   const orderFileDropRef = useRef<HTMLDivElement>(null)
@@ -424,11 +436,6 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
     }
   }
 
-  const handleRemoveOrderFile = (id: string) => {
-    setOrderFiles(prev => prev.filter(f => f.id !== id))
-    if (orderFiles.length <= 1) setOrderColumns([])
-  }
-
   const handleAddAuxTable = () => {
     setAuxTables(prev => [...prev, {
       id: `aux-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -466,6 +473,155 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
     setAuxTables(prev => prev.map(t => t.id === auxId ? { ...t, matchPairs: t.matchPairs.filter((_, i) => i !== pi) } : t))
   const updateMatchPair = (auxId: string, pi: number, field: 'orderCol' | 'auxCol', value: string) =>
     setAuxTables(prev => prev.map(t => t.id === auxId ? { ...t, matchPairs: t.matchPairs.map((p, i) => i === pi ? { ...p, [field]: value } : p) } : t))
+  // 拖拽连线新建关联（可视化界面2）
+  const handleConnect = (auxId: string, orderCol: string, auxCol: string) =>
+    setAuxTables(prev => prev.map(t => {
+      if (t.id !== auxId) return t
+      if (t.matchPairs.some(p => p.orderCol === orderCol && p.auxCol === auxCol)) return t
+      const kept = t.matchPairs.filter(p => p.orderCol || p.auxCol)
+      return { ...t, matchPairs: [...kept, { orderCol, auxCol }] }
+    }))
+  // 删除一条关联（可视化界面2 双击面板）
+  const removeMatchPair = (auxId: string, pi: number) =>
+    setAuxTables(prev => prev.map(t => t.id === auxId ? { ...t, matchPairs: t.matchPairs.filter((_, i) => i !== pi) } : t))
+  // 修改连接方式（可视化界面2 表头下拉）
+  const changeJoinType = (auxId: string, how: 'left' | 'inner' | 'right') =>
+    updateAuxTable(auxId, { how })
+
+  // ─── 界面4：第二步「模板匹配」——复用 LeftJoinModelView（模板表作左表，拆分明细表作右表）───
+  const templateMatchAuxTables = useMemo(() => [{
+    id: 'tmpl-detail',
+    name: '拆分明细表',
+    fileName: '',
+    matchPairs: (matchFieldTable1 || matchFieldTable2)
+      ? [{ orderCol: matchFieldTable2, auxCol: matchFieldTable1 }]
+      : [],
+    how: 'left' as const,
+  }], [matchFieldTable1, matchFieldTable2])
+  const templateMatchAuxColumnsMap = useMemo(() => ({
+    'tmpl-detail': table1Columns.length > 0 ? table1Columns : orderColumns,
+  }), [table1Columns, orderColumns])
+  // 改/建关联 → 写回 matchFieldTable2（模板侧键）与 matchFieldTable1（明细侧键）
+  const updateTemplateMatchPair = (_auxId: string, _pi: number, field: 'orderCol' | 'auxCol', value: string) => {
+    if (field === 'orderCol') setMatchFieldTable2(value)
+    else setMatchFieldTable1(value)
+  }
+  const connectTemplateMatch = (_auxId: string, orderCol: string, auxCol: string) => {
+    setMatchFieldTable2(orderCol)
+    setMatchFieldTable1(auxCol)
+  }
+
+  // ─── 字段映射（数据表取值）→ 复用 LeftJoinModelView（模板表 ←→ 数据表，字段级匹配）───
+  const mappingPairs = useMemo(
+    () => fieldMappings.filter(m => m.sourceType === 'table1' && (m.templateCol || m.table1Col)),
+    [fieldMappings],
+  )
+  // 字段映射可视化 —— 按「运行口径」展示：
+  // 辅助表在 S1/S2 合并阶段已被 LEFT JOIN 平铺进合并表，运行时模板表只从这张合并表取值，
+  // 因此右侧只区分「合并表列」与「自定义字段」两类，不再按来源辅助表拆分。
+  const mappingModel = useMemo(() => {
+    const dataCols = table1Columns.length > 0 ? table1Columns : orderColumns
+    const cards: {
+      id: string; name: string; fileName: string; cols: string[]
+      matchPairs: { orderCol: string; auxCol: string }[]; pairIds: string[]
+    }[] = []
+    // 合并表列：运行时唯一数据源（辅助表列已并入其中）。
+    // 兜底：合并表字段尚未读取（未执行 S1·S2）时，把已配置的 table1Col 也并入列，
+    //       保证已配映射不会因字段列表为空而丢线。
+    const mappedTable1Cols = mappingPairs.map(m => m.table1Col || '').filter(Boolean)
+    const mergedCols = Array.from(new Set([...dataCols, ...mappedTable1Cols]))
+    if (mergedCols.length > 0 || mappingPairs.length > 0) {
+      cards.push({
+        id: 'map-table1', name: '合并表列', fileName: '',
+        cols: mergedCols,
+        matchPairs: mappingPairs.map(m => ({ orderCol: m.templateCol, auxCol: m.table1Col || '' })),
+        pairIds: mappingPairs.map(m => m.id),
+      })
+    }
+    // 自定义字段：常量 / 日期 / 自定义填充规则（即「非数据表取值」的来源）。
+    // 身份用 sourceType(value) 唯一，展示用 label；label 重名时追加序号避免撞键。
+    const customOptions = sourceTypeOptions.filter(o => o.value !== 'table1')
+    const customMappings = fieldMappings.filter(m => m.sourceType !== 'table1' && m.templateCol)
+    const customDisplayToValue: Record<string, string> = {}
+    if (customOptions.length > 0 || customMappings.length > 0) {
+      const valueToDisplay: Record<string, string> = {}
+      const seen: Record<string, number> = {}
+      const cols = customOptions.map(o => {
+        seen[o.label] = (seen[o.label] || 0) + 1
+        const disp = seen[o.label] > 1 ? `${o.label}（${seen[o.label]}）` : o.label
+        customDisplayToValue[disp] = o.value
+        valueToDisplay[o.value] = disp
+        return disp
+      })
+      // 旧预设中已废弃的来源类型（如 materialCode / materialName）也纳入，避免丢线
+      const known = new Set(customOptions.map(o => o.value))
+      Array.from(new Set(customMappings.map(m => m.sourceType).filter(s => !known.has(s))))
+        .forEach(s => { customDisplayToValue[s] = s; cols.push(s) })
+      cards.push({
+        id: 'map-custom', name: '自定义字段', fileName: '',
+        cols,
+        matchPairs: customMappings.map(m => ({
+          orderCol: m.templateCol,
+          auxCol: valueToDisplay[m.sourceType] ?? m.sourceType,
+        })),
+        pairIds: customMappings.map(m => m.id),
+      })
+    }
+    return { cards, customDisplayToValue }
+  }, [table1Columns, orderColumns, mappingPairs, sourceTypeOptions, fieldMappings])
+  // 未配置完整的映射数（数据表取值缺模板列/数据表列；自定义取值缺模板列），用于可视化上方提示
+  const incompleteMappingCount = useMemo(
+    () => fieldMappings.filter(m =>
+      m.sourceType === 'table1' ? (!m.templateCol || !m.table1Col) : !m.templateCol
+    ).length,
+    [fieldMappings],
+  )
+  const mappingAuxTables = useMemo(() => mappingModel.cards.map(c => ({
+    id: c.id, name: c.name, fileName: c.fileName, matchPairs: c.matchPairs, pairIds: c.pairIds, how: 'left' as const,
+  })), [mappingModel])
+  const mappingAuxColumnsMap = useMemo(() => {
+    const m: Record<string, string[]> = {}
+    mappingModel.cards.forEach(c => { m[c.id] = c.cols })
+    return m
+  }, [mappingModel])
+  // 改键 → 写回对应字段映射（模板列 / 数据表列 / 自定义来源类型）
+  const updateMappingPair = (auxId: string, pi: number, field: 'orderCol' | 'auxCol', value: string) => {
+    const target = mappingModel.cards.find(c => c.id === auxId)?.pairIds[pi]
+    if (!target) return
+    if (field === 'orderCol') { handleUpdateMapping(target, 'templateCol', value); return }
+    if (auxId === 'map-custom') {
+      const v = mappingModel.customDisplayToValue[value]
+      if (v) handleUpdateMapping(target, 'sourceType', v)
+      return
+    }
+    handleUpdateMapping(target, 'table1Col', value)
+  }
+  // 拖拽连线 → 新增一条字段映射（数据表取值 / 自定义字段取值）
+  const connectMapping = (auxId: string, orderCol: string, auxCol: string) => {
+    if (auxId === 'map-custom') {
+      const v = mappingModel.customDisplayToValue[auxCol]
+      if (!v) return
+      if (fieldMappings.some(m => m.templateCol === orderCol && m.sourceType === v)) return
+      setFieldMappings(prev => [...prev, {
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        templateCol: orderCol,
+        sourceType: v as SourceType,
+      } as FieldMapping])
+      return
+    }
+    if (mappingPairs.some(m => m.templateCol === orderCol && m.table1Col === auxCol)) return
+    setFieldMappings(prev => [...prev, {
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      templateCol: orderCol,
+      sourceType: 'table1',
+      table1Col: auxCol,
+    } as FieldMapping])
+  }
+  // 删除关联 → 删除该字段映射
+  const removeMappingPair = (auxId: string, pi: number) => {
+    const target = mappingModel.cards.find(c => c.id === auxId)?.pairIds[pi]
+    if (target) handleDeleteMapping(target)
+  }
 
   // ═══════════════════════════════════════════════════════════
   // 金蝶导入操作
@@ -643,6 +799,8 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
 
     setStep1Executing(true); setMergeError(''); setMergeProgressLogs([]); setMergeResult(null)
     setStep1Done(false); setStep1MergedPath('')
+    // 合并重跑 → 下游分步产物失效
+    setS3Result(null); setS4Dir(''); setS5FilledFiles([]); setFinalResult(null)
     setExecutePhase(t.progressMerging)
 
     try {
@@ -759,6 +917,110 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
     } finally {
       setStep2Executing(false)
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // S3~S6：分步执行（后端调用与参数与 handleStep2Import 完全一致）
+  // ═══════════════════════════════════════════════════════════
+  const handleS3Split = async () => {
+    if (!step1Done || !step1MergedPath) { setToast({ type: 'error', msg: t.needStep1First }); return }
+    if (!groupByColumn) { setToast({ type: 'error', msg: t.validateNoGroupBy }); return }
+    setS3Executing(true); setS3Result(null); setMergeProgressLogs([])
+    setExecutePhase(t.progressStep1)
+    try {
+      const tmpDir = await window.electronAPI.app.getPath('temp')
+      const s1 = await window.electronAPI.kingdeeImport.step1({ table1Path: step1MergedPath, groupByColumn, startBillNo, billNoStep, billNoBaseField, outputDir: tmpDir })
+      if (!s1.success) { setToast({ type: 'error', msg: s1.error || t.progressStep1Fail }); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep1Done()])
+      setS3Result({ outputPath: s1.data.outputPath })
+      setExecutePhase(t.stepDoneS3)
+      setToast({ type: 'success', msg: t.stepDoneS3 })
+    } catch (e: any) {
+      setToast({ type: 'error', msg: t.resultStep2Error(e) })
+    } finally { setS3Executing(false) }
+  }
+
+  const handleS4Match = async () => {
+    if (!step1Done || !step1MergedPath) { setToast({ type: 'error', msg: t.needStep1First }); return }
+    if (!table2Path) { setToast({ type: 'error', msg: t.validateNoTemplate }); return }
+    if (!groupByColumn) { setToast({ type: 'error', msg: t.validateNoGroupBy }); return }
+    if (!matchFieldTable1 || !matchFieldTable2) { setToast({ type: 'error', msg: t.validateNoMatchField }); return }
+    setS4Executing(true); setS4Dir(''); setS5FilledFiles([]); setFinalResult(null); setMergeProgressLogs([])
+    try {
+      const tmpDir = await window.electronAPI.app.getPath('temp')
+      setExecutePhase(t.progressStep2a)
+      const s21 = await window.electronAPI.kingdeeImport.step2a({ table1Path: step1MergedPath, table2Path, groupByColumn, matchFieldTable1, matchFieldTable2, startBillNo, billNoStep, billNoBaseField, templateHeaderRowIndex, templateDataStartRowIndex, outputDir: tmpDir })
+      if (!s21.success) { setToast({ type: 'error', msg: s21.error || t.progressStep2aFail }); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep2aDone])
+      setExecutePhase(t.progressStep2b)
+      const s21Dir = s21.data.outputPath.replace(/\\[^\\]+$/, '')
+      const s22 = await window.electronAPI.kingdeeImport.step2b({ inputDir: s21Dir, outputDir: tmpDir })
+      if (!s22.success) { setToast({ type: 'error', msg: s22.error || t.progressStep2bFail }); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep2bDone])
+      setS4Dir(s22.data.outputPath.replace(/\\[^\\]+$/, ''))
+      setExecutePhase(t.stepDoneS4)
+      setToast({ type: 'success', msg: t.stepDoneS4 })
+    } catch (e: any) {
+      setToast({ type: 'error', msg: t.resultStep2Error(e) })
+    } finally { setS4Executing(false) }
+  }
+
+  const handleS5Fill = async () => {
+    if (!s4Dir) { setToast({ type: 'error', msg: t.needS4First }); return }
+    if (!table2Path) { setToast({ type: 'error', msg: t.validateNoTemplate }); return }
+    if (fieldMappings.length === 0) { setToast({ type: 'error', msg: t.validateNoFieldMapping }); return }
+    for (const m of fieldMappings) {
+      const cfg = seqConfigs.find(c => c.id === m.sourceType)
+      if (cfg && cfg.type === 'fieldBased' && !cfg.baseField) {
+        setToast({ type: 'error', msg: `填充规则"${cfg.name}"配置：请选择基于字段` }); return
+      }
+    }
+    setS5Executing(true); setS5FilledFiles([]); setFinalResult(null); setMergeProgressLogs([])
+    try {
+      const tmpDir = await window.electronAPI.app.getPath('temp')
+      setExecutePhase(t.progressStep2c)
+      const s23 = await window.electronAPI.kingdeeImport.step2c({ inputDir: s4Dir, fieldMappings, date, matchFieldTable1, matchFieldTable2, templateHeaderRowIndex, templateDataStartRowIndex, table2Path, outputDir: tmpDir, seqConfigs })
+      if (!s23.success) { setToast({ type: 'error', msg: s23.error || t.progressStep2cFail }); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep2cDone])
+      setExecutePhase(t.progressStep2d)
+      const s23Dir = s23.data.outputPath.replace(/\\[^\\]+$/, '')
+      const s24 = await window.electronAPI.kingdeeImport.step2d({ inputDir: s23Dir, table2Path, templateHeaderRowIndex, templateDataStartRowIndex, outputDir: tmpDir })
+      if (!s24.success) { setToast({ type: 'error', msg: s24.error || t.progressStep2dFail }); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep2dDone])
+      setS5FilledFiles(s24.data.filledTemplateFiles.map((ft: any) => ({ filePath: ft.filePath })))
+      setExecutePhase(t.stepDoneS5)
+      setToast({ type: 'success', msg: t.stepDoneS5 })
+    } catch (e: any) {
+      setToast({ type: 'error', msg: t.resultStep2Error(e) })
+    } finally { setS5Executing(false) }
+  }
+
+  const handleS6Export = async () => {
+    if (s5FilledFiles.length === 0) { setToast({ type: 'error', msg: t.needS5First }); return }
+    if (!table2Path) { setToast({ type: 'error', msg: t.validateNoTemplate }); return }
+    if (!outputDir) { setToast({ type: 'error', msg: t.validateNoOutputDir }); return }
+    setS6Executing(true); setFinalResult(null); setMergeProgressLogs([])
+    setExecutePhase(t.progressStep3)
+    try {
+      const s3 = await window.electronAPI.kingdeeImport.step3({
+        table2Path,
+        filledTemplateFiles: s5FilledFiles,
+        templateHeaderRowIndex, templateDataStartRowIndex,
+        outputDir, outputPrefix, textFormatColumns: kingdeeTextCols
+      })
+      if (!s3.success) { setToast({ type: 'error', msg: s3.error || t.progressStep3Fail }); return }
+      setMergeProgressLogs(prev => [...prev, t.progressStep3Done(s3.data.outputPath)])
+      setFinalResult({
+        outputPath: s3.data.outputPath,
+        totalOrders: s3.data.totalOrders,
+        totalRows: s3.data.totalRows,
+        fallbackWarning: s3.data.fallbackWarning
+      })
+      setExecutePhase(t.resultStep2DoneTitle)
+      setToast({ type: 'success', msg: t.resultStep2DoneMsg })
+    } catch (e: any) {
+      setToast({ type: 'error', msg: t.resultStep2Error(e) })
+    } finally { setS6Executing(false) }
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -988,28 +1250,6 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
           ══════════════════════════════════════════════════════ */}
       <div className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm rounded-lg border-2 border-gray-200 p-4 shadow-md">
         <div className="flex items-center justify-end space-x-4">
-          <button onClick={handleStep1Merge} disabled={step1Executing}
-            className="px-5 py-2 text-sm font-semibold text-white bg-primary-800 rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
-            {step1Executing && (
-              <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            )}
-            {step1Executing ? t.btnStep1Merging : t.btnStep1Merge}
-          </button>
-          <button onClick={handleStep2Import}
-            disabled={step2Executing || !step1Done}
-            className="px-5 py-2 text-sm font-semibold text-white bg-primary-800 rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center"
-            title={!step1Done ? t.needStep1First : ''}>
-            {step2Executing && (
-              <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            )}
-            {step2Executing ? t.btnStep2Generating : t.btnStep2Generate}
-          </button>
           <button onClick={handleRunAll} disabled={isExecuting}
             className="px-5 py-2 text-sm font-semibold text-white bg-primary-800 rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
             {isRunAll ? (
@@ -1028,50 +1268,97 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       </div>
 
       {/* ══════════════════════════════════════════════════════
-          第一步：合并Excel
+          执行进度（任一步骤运行时显示，统一日志区）
+          ══════════════════════════════════════════════════════ */}
+      {(isExecuting || mergeProgressLogs.length > 0 || mergeError) && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
+          {executePhase && (
+            <div className="text-sm text-black font-medium mb-2">
+              {isExecuting && (
+                <svg className="animate-spin h-4 w-4 inline mr-2 text-primary-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              )}
+              {executePhase}
+            </div>
+          )}
+
+          {/* 合并进度条 */}
+          {step1Executing && mergeProgress && (
+            <>
+              <div className="flex justify-between text-xs text-black mb-1">
+                <span>{mergeProgress.step || ''}</span>
+                <span className="font-medium text-black">{mergeProgress.overallProgress || 0}%</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2 mb-2 overflow-hidden">
+                <div className="bg-primary-800 h-2 rounded-full transition-all duration-300" style={{ width: `${mergeProgress?.overallProgress || 0}%` }} />
+              </div>
+            </>
+          )}
+
+          {/* 日志 */}
+          {mergeProgressLogs.length > 0 && (
+            <div className="bg-gray-900 rounded p-2 max-h-36 overflow-y-auto font-mono text-xs space-y-0.5">
+              {mergeProgressLogs.map((log, i) => (
+                <div key={i} className={log.startsWith('✓') ? 'text-green-400' : 'text-gray-300'}>
+                  <span className="text-gray-500">&gt;</span> {log}
+                </div>
+              ))}
+              <div ref={mergeLogsEndRef} />
+            </div>
+          )}
+
+          {/* 错误 */}
+          {mergeError && <div className="mt-2 bg-red-50 border border-red-200 rounded p-2"><p className="text-red-600 text-xs">{mergeError}</p></div>}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════
+          S1：合并表格
           ══════════════════════════════════════════════════════ */}
       <div className="bg-white rounded-lg border-2 border-blue-200 p-4">
-        <h2 className="text-base font-semibold text-black mb-4 flex items-center">
+        <h2 className="text-base font-semibold text-black mb-1 flex items-center">
           <span className="w-6 h-6 bg-primary-800 text-white rounded-full flex items-center justify-center text-xs font-bold mr-2">1</span>
-          {t.step1Title}
+          {t.stepS1Title}
         </h2>
+        <p className="text-xs text-black mb-4 ml-8">{t.stepS1Desc}</p>
 
-        {/* 文件配置 */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 mb-4">
-          <h3 className="text-sm font-semibold text-black mb-4">{t.sectionFileConfig}</h3>
-
-          {/* 订单文件 */}
-          <div className="mb-4">
-            <div ref={orderFileDropRef}
-              className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-colors ${
-                orderFileDragOver ? 'border-primary-400 bg-primary-800 border-dashed' : 'border-gray-200'
-              }`}>
-              <label className="text-sm text-black w-32 flex-shrink-0">{t.labelOrderFiles}</label>
-              <button onClick={handleSelectOrderFiles} disabled={isExecuting}
-                className="px-3 py-1.5 text-sm bg-primary-800 text-white rounded hover:bg-primary-700 disabled:cursor-not-allowed">{t.btnSelectFile}</button>
-              <span className="text-sm text-black truncate flex-1">
-                {orderFiles.length > 0 ? `已选 ${orderFiles.length} 个文件` : t.placeholderDragFile}
-              </span>
-              {orderFiles.length > 0 && (
-                <button onClick={() => { setOrderFiles([]); setOrderColumns([]) }} disabled={isExecuting}
-                  className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100">{t.btnClear}</button>
-              )}
-            </div>
+        {/* 订单文件 */}
+        <div className="mb-4">
+          <div ref={orderFileDropRef}
+            className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-colors ${
+              orderFileDragOver ? 'border-primary-400 bg-primary-800 border-dashed' : 'border-gray-200'
+            }`}>
+            <label className="text-sm text-black w-32 flex-shrink-0">{t.labelOrderFiles}</label>
+            <button onClick={handleSelectOrderFiles} disabled={isExecuting}
+              className="px-3 py-1.5 text-sm bg-primary-800 text-white rounded hover:bg-primary-700 disabled:cursor-not-allowed">{t.btnSelectFile}</button>
+            <span className="text-sm text-black truncate flex-1">
+              {orderFiles.length > 0 ? `已选 ${orderFiles.length} 个文件` : t.placeholderDragFile}
+            </span>
             {orderFiles.length > 0 && (
-              <div className="mt-2 max-h-24 overflow-y-auto space-y-0.5 pl-2">
-                {orderFiles.map((f, i) => (
-                  <div key={f.id} className="flex items-center justify-between px-1 py-0.5 hover:bg-gray-50 rounded">
-                    <span className="text-xs text-black truncate flex-1">
-                      <span className="text-black mr-1">{i + 1}.</span>
-                      {f.name}
-                    </span>
-                    <button onClick={() => handleRemoveOrderFile(f.id)} disabled={isExecuting}
-                      className="px-1.5 py-0.5 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 flex-shrink-0">✕</button>
-                  </div>
-                ))}
-              </div>
+              <button onClick={() => { setOrderFiles([]); setOrderColumns([]) }} disabled={isExecuting}
+                className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100">{t.btnClear}</button>
             )}
           </div>
+        </div>
+
+        {/* 界面1：待合并文件清单 */}
+        <FolderMergeView orderFiles={orderFiles} />
+
+        <p className="mt-3 text-xs text-black bg-blue-50 border border-blue-100 rounded px-3 py-2">{t.stepS1SharedHint}</p>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════
+          S2：关联辅助表
+          ══════════════════════════════════════════════════════ */}
+      <div className="bg-white rounded-lg border-2 border-blue-200 p-4">
+        <h2 className="text-base font-semibold text-black mb-1 flex items-center">
+          <span className="w-6 h-6 bg-primary-800 text-white rounded-full flex items-center justify-center text-xs font-bold mr-2">2</span>
+          {t.stepS2Title}
+          <span className="ml-2 text-xs font-normal text-black">{t.stepS2DependsS1}</span>
+        </h2>
+        <p className="text-xs text-black mb-4 ml-8">{t.stepS2Desc}</p>
 
           {/* 辅助表 */}
           <div className="mb-4">
@@ -1142,207 +1429,267 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
             </div>
           </div>
 
+          {/* 界面2：Left Join 建模 */}
+          <LeftJoinModelView
+            mergedColumns={table1Columns.length > 0 ? table1Columns : orderColumns}
+            auxTables={auxTables}
+            auxColumnsMap={auxColumnsMap}
+            onChangeMatchPair={updateMatchPair}
+            onConnect={handleConnect}
+            onRemoveMatchPair={removeMatchPair}
+            onChangeJoinType={changeJoinType}
+          />
+
+          {/* S2 — 操作按钮（S1·S2 共用执行按钮） */}
+          <div className="flex items-center space-x-3 mt-4 mb-4">
+            {step1Done && (
+              <span className="text-sm text-black flex items-center">
+                <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                {t.step1DoneLabel}
+              </span>
+            )}
+            <div className="flex-1" />
+            <button onClick={handleSaveStep1Preset} disabled={isExecuting || !project}
+              className="px-3 py-2 text-sm bg-primary-800 text-white rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
+              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+              </svg>
+              {t.btnSavePreset}
+            </button>
+            <button onClick={handleStep1Merge} disabled={isExecuting}
+              className="px-4 py-2 text-sm font-semibold text-white bg-primary-800 rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
+              {step1Executing && (
+                <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              )}
+              {t.btnExecS1S2}
+            </button>
+          </div>
+
+          {/* S2 — 合并结果 */}
+          {mergeResult && !step1Executing && (
+            <div className="bg-primary-800 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-white">
+                  <svg className="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {t.step1DoneLabel}
+                </span>
+                <button onClick={() => window.electronAPI.shell.openPath(mergeResult.outputPath)}
+                  className="px-3 py-1 text-xs bg-primary-700 text-white rounded hover:bg-primary-600">{t.btnOpenOutput}</button>
+              </div>
+              <div className="grid grid-cols-4 gap-3 mb-3">
+                <div className="bg-white rounded p-2 text-center">
+                  <p className="text-lg font-bold text-black">{mergeResult.totalRows}</p>
+                  <p className="text-xs text-black">{t.statTotalRows}</p>
+                </div>
+                <div className="bg-white rounded p-2 text-center">
+                  <p className="text-lg font-bold text-black">{mergeResult.totalColumns}</p>
+                  <p className="text-xs text-black">{t.statTotalCols}</p>
+                </div>
+                <div className="bg-white rounded p-2 text-center">
+                  <p className="text-lg font-bold text-black">{mergeResult.matchedCount}</p>
+                  <p className="text-xs text-black">{t.statMatchedRows}</p>
+                </div>
+                <div className="bg-white rounded p-2 text-center">
+                  <p className="text-lg font-bold text-black">{mergeResult.unmatchedCount}</p>
+                  <p className="text-xs text-black">{t.statUnmatchedRows}</p>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-white mb-1">{t.statOutputFile}</div>
+                <button onClick={() => window.electronAPI.shell.openPath(mergeResult.outputPath)}
+                  className="text-xs text-white hover:text-white truncate block max-w-xs">
+                  {mergeResult.outputPath}
+                </button>
+              </div>
+            </div>
+          )}
+      </div>
+
+      {/* ══════════════════════════════════════════════════════
+          S3：订单拆分
+          ══════════════════════════════════════════════════════ */}
+      <div className="bg-white rounded-lg border-2 border-blue-200 p-4">
+        <h2 className="text-base font-semibold text-black mb-1 flex items-center">
+          <span className="w-6 h-6 bg-primary-800 text-white rounded-full flex items-center justify-center text-xs font-bold mr-2">3</span>
+          {t.stepS3Title}
+          <span className="ml-2 text-xs font-normal text-black">{t.stepS3DependsS2}</span>
+        </h2>
+        <p className="text-xs text-black mb-4 ml-8">{t.stepS3Desc}</p>
+
+        <div className="flex items-center space-x-3 mb-3">
+          <label className="text-sm text-black w-28 flex-shrink-0">{t.labelGroupByColumn}</label>
+          <div className="flex-1">
+            <SearchableSelect value={groupByColumn} options={orderColumns} onChange={setGroupByColumn}
+              placeholder={t.placeholderSelectCol} disabled={isExecuting} />
+          </div>
         </div>
 
-        {/* Step 1 — 操作按钮 */}
-        <div className="flex items-center space-x-3 mb-4">
-          {step1Done && (
+        {/* 界面3：订单拆分 */}
+        <SplitOrderView
+          mergedColumns={table1Columns.length > 0 ? table1Columns : orderColumns}
+          groupByColumn={groupByColumn}
+          startBillNo={startBillNo}
+          billNoStep={billNoStep}
+        />
+
+        {/* S3 — 操作按钮 */}
+        <div className="flex items-center space-x-3 mt-4">
+          {s3Result && !s3Executing && (
             <span className="text-sm text-black flex items-center">
               <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-              {t.step1DoneLabel}
+              {t.stepDoneS3}
             </span>
           )}
           <div className="flex-1" />
-          <button onClick={handleSaveStep1Preset} disabled={isExecuting || !project}
-            className="px-3 py-2 text-sm bg-primary-800 text-white rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
-            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-            </svg>
-            {t.btnSavePreset}
+          <button onClick={handleS3Split} disabled={isExecuting}
+            className="px-4 py-2 text-sm font-semibold text-white bg-primary-800 rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
+            {s3Executing && (
+              <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            )}
+            {t.btnExecS3}
           </button>
         </div>
 
-        {/* Step 1 — 输出/进度 */}
-        {(step1Executing || mergeProgressLogs.length > 0 || mergeResult || mergeError) && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
-            {/* 当前阶段 */}
-            {executePhase && (
-              <div className="text-sm text-black font-medium mb-2">
-                {step1Executing && (
-                  <svg className="animate-spin h-4 w-4 inline mr-2 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                )}
-                {executePhase}
-              </div>
-            )}
-
-            {/* 合并进度条 */}
-            {step1Executing && mergeProgress && (
-              <>
-                <div className="flex justify-between text-xs text-black mb-1">
-                  <span>{mergeProgress.step || ''}</span>
-                  <span className="font-medium text-black">{mergeProgress.overallProgress || 0}%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2 mb-2 overflow-hidden">
-                  <div className="bg-primary-800 h-2 rounded-full transition-all duration-300" style={{ width: `${mergeProgress?.overallProgress || 0}%` }} />
-                </div>
-              </>
-            )}
-
-            {/* 日志 */}
-            {mergeProgressLogs.length > 0 && (
-              <div className="bg-gray-900 rounded p-2 max-h-36 overflow-y-auto font-mono text-xs space-y-0.5">
-                {mergeProgressLogs.map((log, i) => (
-                  <div key={i} className={log.startsWith('✓') ? 'text-green-400' : 'text-gray-300'}>
-                    <span className="text-gray-500">&gt;</span> {log}
-                  </div>
-                ))}
-                <div ref={mergeLogsEndRef} />
-              </div>
-            )}
-
-            {/* 错误 */}
-            {mergeError && <div className="mt-2 bg-red-50 border border-red-200 rounded p-2"><p className="text-red-600 text-xs">{mergeError}</p></div>}
-
-            {/* 合并结果统计 */}
-            {mergeResult && !step1Executing && (
-              <div className="bg-primary-800 border border-blue-200 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-semibold text-white">
-                    <svg className="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    {t.step1DoneLabel}
-                  </span>
-                  <button onClick={() => window.electronAPI.shell.openPath(mergeResult.outputPath)}
-                    className="px-3 py-1 text-xs bg-primary-700 text-white rounded hover:bg-primary-600">{t.btnOpenOutput}</button>
-                </div>
-                <div className="grid grid-cols-4 gap-3 mb-3">
-                  <div className="bg-white rounded p-2 text-center">
-                    <p className="text-lg font-bold text-black">{mergeResult.totalRows}</p>
-                    <p className="text-xs text-black">{t.statTotalRows}</p>
-                  </div>
-                  <div className="bg-white rounded p-2 text-center">
-                    <p className="text-lg font-bold text-black">{mergeResult.totalColumns}</p>
-                    <p className="text-xs text-black">{t.statTotalCols}</p>
-                  </div>
-                  <div className="bg-white rounded p-2 text-center">
-                    <p className="text-lg font-bold text-black">{mergeResult.matchedCount}</p>
-                    <p className="text-xs text-black">{t.statMatchedRows}</p>
-                  </div>
-                  <div className="bg-white rounded p-2 text-center">
-                    <p className="text-lg font-bold text-black">{mergeResult.unmatchedCount}</p>
-                    <p className="text-xs text-black">{t.statUnmatchedRows}</p>
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-white mb-1">{t.statOutputFile}</div>
-                  <button onClick={() => window.electronAPI.shell.openPath(mergeResult.outputPath)}
-                    className="text-xs text-white hover:text-white truncate block max-w-xs">
-                    {mergeResult.outputPath}
-                  </button>
-                </div>
-              </div>
-            )}
+        {/* S3 — 拆分结果 */}
+        {s3Result && !s3Executing && (
+          <div className="mt-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
+            <div className="text-xs text-black mb-1">{t.resultSplitFile}</div>
+            <button onClick={() => window.electronAPI.shell.openPath(s3Result.outputPath)}
+              className="text-xs text-primary-700 hover:text-primary-800 truncate block max-w-md">
+              {s3Result.outputPath}
+            </button>
           </div>
         )}
       </div>
 
       {/* ══════════════════════════════════════════════════════
-          第二步：生成导入金蝶的汇总表
+          S4：模板匹配
           ══════════════════════════════════════════════════════ */}
       <div className="bg-white rounded-lg border-2 border-blue-200 p-4">
-        <h2 className="text-base font-semibold text-black mb-4 flex items-center">
-          <span className="w-6 h-6 bg-primary-800 text-white rounded-full flex items-center justify-center text-xs font-bold mr-2">2</span>
-          {t.step2Title}
+        <h2 className="text-base font-semibold text-black mb-1 flex items-center">
+          <span className="w-6 h-6 bg-primary-800 text-white rounded-full flex items-center justify-center text-xs font-bold mr-2">4</span>
+          {t.stepS4Title}
+          <span className="ml-2 text-xs font-normal text-black">{t.stepS4DependsS2}</span>
         </h2>
+        <p className="text-xs text-black mb-4 ml-8">{t.stepS4Desc}</p>
 
-        {/* 模板表 & 输出配置 */}
-        <div className="bg-white rounded-lg border-2 border-gray-100 p-4 mb-4">
-          <h3 className="text-sm font-semibold text-black mb-4">{t.sectionOutputConfig}</h3>
-          <div className="space-y-3">
-            <div ref={table2DropRef}
-              className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-colors ${
-                table2DragOver ? 'border-primary-400 bg-primary-800 border-dashed' : 'border-gray-200'
-              }`}>
-              <label className="text-sm text-black w-32 flex-shrink-0">{t.labelTemplateTable}</label>
-              <button onClick={handleSelectTable2} disabled={isExecuting}
-                className="px-3 py-1.5 text-sm bg-primary-800 text-white rounded hover:bg-primary-700 disabled:cursor-not-allowed">{t.btnSelectFile}</button>
-              <span className="text-sm text-black truncate flex-1">{table2Path || t.placeholderDragOrClick}</span>
+        {/* 模板表地址 */}
+        <div ref={table2DropRef}
+          className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-colors mb-3 ${
+            table2DragOver ? 'border-primary-400 bg-primary-800 border-dashed' : 'border-gray-200'
+          }`}>
+          <label className="text-sm text-black w-32 flex-shrink-0">{t.labelTemplateTable}</label>
+          <button onClick={handleSelectTable2} disabled={isExecuting}
+            className="px-3 py-1.5 text-sm bg-primary-800 text-white rounded hover:bg-primary-700 disabled:cursor-not-allowed">{t.btnSelectFile}</button>
+          <span className="text-sm text-black truncate flex-1">{table2Path || t.placeholderDragOrClick}</span>
+        </div>
+
+        {/* 模板表头行（紧邻模板表地址下方） */}
+        <div className="flex items-center space-x-3 p-3 rounded-lg border-2 border-gray-200 mb-3">
+          <label className="text-sm text-black w-32 flex-shrink-0">{t.labelTemplateHeaderRow}</label>
+          <input type="number" value={templateHeaderRowIndex}
+            onChange={e => handleHeaderRowChange(parseInt(e.target.value) || 0)}
+            disabled={isExecuting}
+            className="max-w-64 flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
+        </div>
+
+        {/* 匹配字段 */}
+        <div className="space-y-3 mb-3">
+          <div className="flex items-center space-x-3">
+            <label className="text-sm text-black w-32 flex-shrink-0">{t.labelMatchFieldTable}</label>
+            <div className="flex-1">
+              <SearchableSelect value={matchFieldTable1} options={table1Columns} onChange={setMatchFieldTable1}
+                placeholder={t.selectPlaceholder} disabled={isExecuting} />
             </div>
-            <div className="flex items-center space-x-3 p-3 rounded-lg border-2 border-gray-200">
-              <label className="text-sm text-black w-32 flex-shrink-0">{t.labelOutputDir}</label>
-              <input type="text" value={outputDir} onClick={handleSelectOutputDir} readOnly
-                disabled={isExecuting}
-                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50 cursor-pointer"
-                placeholder={t.placeholderSelectDir} />
-            </div>
-            <div className="flex items-center space-x-3 p-3 rounded-lg border-2 border-gray-200">
-              <label className="text-sm text-black w-32 flex-shrink-0">{t.labelOutputPrefix}</label>
-              <input type="text" value={outputPrefix} onChange={e => setOutputPrefix(e.target.value)}
-                disabled={isExecuting}
-                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
+          </div>
+          <div className="flex items-center space-x-3">
+            <label className="text-sm text-black w-32 flex-shrink-0">{t.labelMatchFieldTemplate}</label>
+            <div className="flex-1">
+              <SearchableSelect value={matchFieldTable2} options={templateColumns} onChange={setMatchFieldTable2}
+                placeholder={t.selectPlaceholder} disabled={isExecuting} />
             </div>
           </div>
         </div>
 
-        {/* 客户订单拆分字段配置 */}
-        <div className="bg-white rounded-lg border-2 border-gray-200 p-4 mb-4">
-          <h3 className="text-sm font-semibold text-black mb-3">{t.sectionSplitConfig}</h3>
-          <div className="space-y-3">
-            <div className="flex items-center space-x-3">
-              <label className="text-sm text-black w-28 flex-shrink-0">{t.labelGroupByColumn}</label>
-              <div className="flex-1">
-                <SearchableSelect value={groupByColumn} options={orderColumns} onChange={setGroupByColumn}
-                  placeholder={t.placeholderSelectCol} disabled={isExecuting} />
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <label className="text-sm text-black w-28 flex-shrink-0">{t.labelMatchFieldTable}</label>
-              <div className="flex-1">
-                <SearchableSelect value={matchFieldTable1} options={table1Columns} onChange={setMatchFieldTable1}
-                  placeholder={t.selectPlaceholder} disabled={isExecuting} />
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <label className="text-sm text-black w-28 flex-shrink-0">{t.labelMatchFieldTemplate}</label>
-              <div className="flex-1">
-                <SearchableSelect value={matchFieldTable2} options={templateColumns} onChange={setMatchFieldTable2}
-                  placeholder={t.selectPlaceholder} disabled={isExecuting} />
-              </div>
-            </div>
-          </div>
+        {/* 界面4：模板匹配（复用界面2 的 LeftJoinModelView） */}
+        <LeftJoinModelView
+          mergedColumns={templateColumns}
+          auxTables={templateMatchAuxTables}
+          auxColumnsMap={templateMatchAuxColumnsMap}
+          onChangeMatchPair={updateTemplateMatchPair}
+          onConnect={connectTemplateMatch}
+          leftTitle="模板表"
+          toolbarTitle="模板表 Left Join 拆分明细表（第二步）"
+          leftFieldLabel="模板表"
+        />
+
+        {/* S4 — 操作按钮 */}
+        <div className="flex items-center space-x-3 mt-4">
+          {s4Dir && !s4Executing && (
+            <span className="text-sm text-black flex items-center">
+              <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+              {t.stepDoneS4}
+            </span>
+          )}
+          <div className="flex-1" />
+          <button onClick={handleS4Match} disabled={isExecuting}
+            className="px-4 py-2 text-sm font-semibold text-white bg-primary-800 rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
+            {s4Executing && (
+              <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            )}
+            {t.btnExecS4}
+          </button>
         </div>
 
-        {/* 表格字段配置 */}
-        <div className="bg-white rounded-lg border border-gray-100 p-4 mb-4">
-          <h3 className="text-sm font-semibold text-black mb-4">{t.sectionFieldConfig}</h3>
-
-          <div className="space-y-3 mb-4">
-            <div className="flex items-center space-x-3">
-              <label className="text-sm text-black w-32 flex-shrink-0">{t.labelTemplateHeaderRow}</label>
-              <input type="number" value={templateHeaderRowIndex}
-                onChange={e => handleHeaderRowChange(parseInt(e.target.value) || 0)}
-                disabled={isExecuting}
-                className="max-w-64 flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
-            </div>
-            <div className="flex items-center space-x-3">
-              <label className="text-sm text-black w-32 flex-shrink-0">{t.labelDate}</label>
-              <input type="date" value={date} onChange={e => setDate(e.target.value)}
-                disabled={isExecuting}
-                className="max-w-64 flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
-            </div>
+        {/* S4 — 匹配结果 */}
+        {s4Dir && !s4Executing && (
+          <div className="mt-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
+            <div className="text-xs text-black mb-1">{t.resultMatchOutput}</div>
+            <button onClick={() => window.electronAPI.shell.openPath(s4Dir)}
+              className="text-xs text-primary-700 hover:text-primary-800 truncate block max-w-md">
+              {s4Dir}
+            </button>
           </div>
+        )}
+      </div>
 
-          {/* 序号自增配置 */}
+      {/* ══════════════════════════════════════════════════════
+          S5：字段填充
+          ══════════════════════════════════════════════════════ */}
+      <div className="bg-white rounded-lg border-2 border-blue-200 p-4">
+        <h2 className="text-base font-semibold text-black mb-1 flex items-center">
+          <span className="w-6 h-6 bg-primary-800 text-white rounded-full flex items-center justify-center text-xs font-bold mr-2">5</span>
+          {t.stepS5Title}
+          <span className="ml-2 text-xs font-normal text-black">{t.stepS5DependsS4}</span>
+        </h2>
+        <p className="text-xs text-black mb-4 ml-8">{t.stepS5Desc}</p>
+
+        <div className="flex items-center space-x-3 mb-4">
+          <label className="text-sm text-black w-32 flex-shrink-0">{t.labelDate}</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)}
+            disabled={isExecuting}
+            className="max-w-64 flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
+        </div>
+
+        {/* 自定义填充规则 */}
           <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-1">
               <p className="text-xs font-semibold text-black uppercase tracking-wider">{t.sectionAutoInc}</p>
               <button onClick={handleAddSeq} disabled={isExecuting}
-                className="px-2 py-1 text-xs bg-primary-800 text-white rounded hover:bg-primary-700 disabled:cursor-not-allowed">{t.btnAdd}</button>
+                className="px-2 py-1 text-xs bg-primary-800 text-white rounded hover:bg-primary-700 disabled:cursor-not-allowed">{t.btnAddRule}</button>
             </div>
+            <p className="text-xs text-black mb-2">{t.sectionFillRulesHint}</p>
             <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollSnapType: 'x mandatory' }}>
               {seqConfigs.map((cfg, idx) => (
                 <div key={cfg.id}
@@ -1362,9 +1709,9 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                   <select value={cfg.type} onChange={e => handleUpdateSeq(cfg.id, 'type', e.target.value)}
                     disabled={isExecuting}
                     className="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50 mb-2">
-                    <option value="constant">{t.sourceConstant}</option>
-                    <option value="sequential">{t.autoIncRuleStep}</option>
-                    <option value="fieldBased">{t.labelBaseField}</option>
+                    <option value="constant">{t.ruleTypeConstant}</option>
+                    <option value="sequential">{t.ruleTypeSequential}</option>
+                    <option value="fieldBased">{t.ruleTypeFieldBased}</option>
                   </select>
                   {cfg.type === 'constant' && (
                     <input type="text" value={cfg.constantValue} onChange={e => handleUpdateSeq(cfg.id, 'constantValue', e.target.value)}
@@ -1401,6 +1748,9 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
                         disabled={isExecuting}
                         className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
                     </>
+                  )}
+                  {cfg.id === 'seq-billNo' && (
+                    <p className="mt-2 text-xs text-black bg-blue-50 border border-blue-100 rounded px-2 py-1">{t.billNoRuleNote}</p>
                   )}
                 </div>
               ))}
@@ -1508,6 +1858,29 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
             </div>
           </div>
 
+          {/* 字段映射可视化：按运行口径展示 —— 模板表 ←（合并表列 / 自定义字段） */}
+          {table1Columns.length === 0 && fieldMappings.some(m => m.sourceType === 'table1') && (
+            <p className="text-xs text-red-600 mb-2">尚未读取合并表字段，请先在上方执行「S1·S2」；下方按已配置的映射列兜底展示连线。</p>
+          )}
+          {incompleteMappingCount > 0 && (
+            <p className="text-xs text-red-600 mb-2">有 {incompleteMappingCount} 条映射未配置完整（缺少模板列或来源字段），未在下方图中连线。</p>
+          )}
+          <div className="mt-1 mb-4">
+            <LeftJoinModelView
+              mergedColumns={templateColumns}
+              auxTables={mappingAuxTables}
+              auxColumnsMap={mappingAuxColumnsMap}
+              onChangeMatchPair={updateMappingPair}
+              onConnect={connectMapping}
+              onRemoveMatchPair={removeMappingPair}
+              leftTitle="模板表"
+              toolbarTitle="运行口径：模板表 ←（合并表列 / 自定义字段）"
+              leftFieldLabel="模板表"
+              emptyText="暂无字段映射，请先在上方添加「数据表取值」或「非数据表取值」"
+              auxHeaderBadge="字段映射"
+            />
+          </div>
+
           {/* 文本格式列（暂隐藏） */}
           {/* <div className="mb-4">
             <div className="flex items-center space-x-3 mb-3">
@@ -1532,24 +1905,15 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
               ))}
             </div>
           </div> */}
-        </div>
-
-        {/* Step 2 — 操作按钮 */}
-        <div className="flex items-center space-x-3 mb-4">
-          {!step1Done && <span className="text-sm text-black">{t.needStep1First}</span>}
-          {finalResult && !step2Executing && (
+        {/* S5 — 操作按钮 */}
+        <div className="flex items-center space-x-3 mt-4 mb-4">
+          {s5FilledFiles.length > 0 && !s5Executing && (
             <span className="text-sm text-black flex items-center">
               <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-              {t.step2DoneLabel}
+              {t.stepDoneS5}
             </span>
           )}
           <div className="flex-1" />
-          {/* 隐藏：加载推荐预设
-          <button onClick={handleLoadRecommended} disabled={isExecuting}
-            className="px-3 py-2 text-sm bg-primary-50 text-black rounded-lg hover:bg-primary-100 shadow-sm disabled:cursor-not-allowed">
-            {t.btnLoadPreset}
-          </button>
-          */}
           <button onClick={handleSaveStep2Preset} disabled={isExecuting || !project}
             className="px-3 py-2 text-sm bg-primary-800 text-white rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
             <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1557,69 +1921,108 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
             </svg>
             {t.btnSavePreset}
           </button>
+          <button onClick={handleS5Fill} disabled={isExecuting}
+            className="px-4 py-2 text-sm font-semibold text-white bg-primary-800 rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
+            {s5Executing && (
+              <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            )}
+            {t.btnExecS5}
+          </button>
         </div>
 
-        {/* Step 2 — 输出/进度 */}
-        {(step2Executing || finalResult) && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
-            {/* 当前阶段 */}
-            {executePhase && step2Executing && (
-              <div className="text-sm text-black font-medium mb-2">
-                <svg className="animate-spin h-4 w-4 inline mr-2 text-primary-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        {/* S5 — 填充结果 */}
+        {s5FilledFiles.length > 0 && !s5Executing && (
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+            <p className="text-xs text-black">{t.resultFilledCount(s5FilledFiles.length)}</p>
+          </div>
+        )}
+      </div>
+
+      {/* ══════════════════════════════════════════════════════
+          S6：汇总输出
+          ══════════════════════════════════════════════════════ */}
+      <div className="bg-white rounded-lg border-2 border-blue-200 p-4">
+        <h2 className="text-base font-semibold text-black mb-1 flex items-center">
+          <span className="w-6 h-6 bg-primary-800 text-white rounded-full flex items-center justify-center text-xs font-bold mr-2">6</span>
+          {t.stepS6Title}
+          <span className="ml-2 text-xs font-normal text-black">{t.stepS6DependsS5}</span>
+        </h2>
+        <p className="text-xs text-black mb-4 ml-8">{t.stepS6Desc}</p>
+
+        {/* 输出配置 */}
+        <div className="space-y-3 mb-3">
+          <div className="flex items-center space-x-3 p-3 rounded-lg border-2 border-gray-200">
+            <label className="text-sm text-black w-32 flex-shrink-0">{t.labelOutputDir}</label>
+            <input type="text" value={outputDir} onClick={handleSelectOutputDir} readOnly
+              disabled={isExecuting}
+              className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50 cursor-pointer"
+              placeholder={t.placeholderSelectDir} />
+          </div>
+          <div className="flex items-center space-x-3 p-3 rounded-lg border-2 border-gray-200">
+            <label className="text-sm text-black w-32 flex-shrink-0">{t.labelOutputPrefix}</label>
+            <input type="text" value={outputPrefix} onChange={e => setOutputPrefix(e.target.value)}
+              disabled={isExecuting}
+              className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:border-primary-400 disabled:bg-gray-50" />
+          </div>
+        </div>
+
+        {/* S6 — 操作按钮 */}
+        <div className="flex items-center space-x-3 mb-3">
+          {finalResult && !s6Executing && (
+            <span className="text-sm text-black flex items-center">
+              <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+              {t.step2DoneLabel}
+            </span>
+          )}
+          <div className="flex-1" />
+          <button onClick={handleS6Export} disabled={isExecuting}
+            className="px-4 py-2 text-sm font-semibold text-white bg-primary-800 rounded-lg hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed flex items-center">
+            {s6Executing && (
+              <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            )}
+            {t.btnExecS6}
+          </button>
+        </div>
+
+        {/* S6 — 最终结果 */}
+        {finalResult && (
+          <div className="bg-primary-800 border border-blue-200 rounded-lg p-4">
+            {finalResult.fallbackWarning && (
+              <div className="mb-2 text-xs text-black bg-amber-50 px-2 py-1 rounded">{finalResult.fallbackWarning}</div>
+            )}
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-semibold text-white">
+                <svg className="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                {executePhase}
+                {t.resultStep2DoneOutput}
+              </span>
+              <button onClick={handleOpenFinalOutput}
+                className="px-3 py-1 text-xs bg-primary-700 text-white rounded hover:bg-primary-600">{t.btnOpenOutput}</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className="bg-white rounded p-2 text-center">
+                <p className="text-lg font-bold text-black">{finalResult.totalOrders}</p>
+                <p className="text-xs text-black">{t.statSplitOrders}</p>
               </div>
-            )}
-
-            {/* 日志 */}
-            {mergeProgressLogs.length > 0 && step2Executing && (
-              <div className="bg-gray-900 rounded p-2 max-h-36 overflow-y-auto font-mono text-xs space-y-0.5 mb-3">
-                {mergeProgressLogs.map((log, i) => (
-                  <div key={i} className={log.startsWith('✓') ? 'text-green-400' : 'text-gray-300'}>
-                    <span className="text-gray-500">&gt;</span> {log}
-                  </div>
-                ))}
-                <div ref={mergeLogsEndRef} />
+              <div className="bg-white rounded p-2 text-center">
+                <p className="text-lg font-bold text-black">{finalResult.totalRows}</p>
+                <p className="text-xs text-black">{t.statOutputRows}</p>
               </div>
-            )}
-
-            {/* 最终结果 */}
-            {finalResult && (
-              <div className="bg-primary-800 border border-blue-200 rounded-lg p-4">
-                {finalResult.fallbackWarning && (
-                  <div className="mb-2 text-xs text-black bg-amber-50 px-2 py-1 rounded">{finalResult.fallbackWarning}</div>
-                )}
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-semibold text-white">
-                    <svg className="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    {t.resultStep2DoneOutput}
-                  </span>
-                  <button onClick={handleOpenFinalOutput}
-                    className="px-3 py-1 text-xs bg-primary-700 text-white rounded hover:bg-primary-600">{t.btnOpenOutput}</button>
-                </div>
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  <div className="bg-white rounded p-2 text-center">
-                    <p className="text-lg font-bold text-black">{finalResult.totalOrders}</p>
-                    <p className="text-xs text-black">{t.statSplitOrders}</p>
-                  </div>
-                  <div className="bg-white rounded p-2 text-center">
-                    <p className="text-lg font-bold text-black">{finalResult.totalRows}</p>
-                    <p className="text-xs text-black">{t.statOutputRows}</p>
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-white mb-1">{t.statOutputFile}</div>
-                  <button onClick={() => window.electronAPI.shell.openPath(finalResult.outputPath)}
-                    className="text-xs text-white hover:text-white truncate block max-w-xs">
-                    {finalResult.outputPath}
-                  </button>
-                </div>
-              </div>
-            )}
+            </div>
+            <div>
+              <div className="text-xs text-white mb-1">{t.statOutputFile}</div>
+              <button onClick={() => window.electronAPI.shell.openPath(finalResult.outputPath)}
+                className="text-xs text-white hover:text-white truncate block max-w-xs">
+                {finalResult.outputPath}
+              </button>
+            </div>
           </div>
         )}
       </div>

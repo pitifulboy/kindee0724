@@ -9,12 +9,15 @@ param([string]$BumpType = "patch")
 
 # 读取当前版本
 $pkg = Get-Content "package.json" | ConvertFrom-Json
-$current = [version]$pkg.version
 
-# 计算新版本
-$major = $current.Major
-$minor = $current.Minor
-$patch = $current.Build
+# 严格解析版本号，避免产生非法版本（如 ".6.0"）
+if ($pkg.version -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
+  Write-Host "✗ package.json 版本号非法: $($pkg.version)" -ForegroundColor Red
+  exit 1
+}
+$major = [int]$Matches[1]
+$minor = [int]$Matches[2]
+$patch = [int]$Matches[3]
 
 switch ($BumpType) {
   "major" { $major++; $minor = 0; $patch = 0 }
