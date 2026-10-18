@@ -1,51 +1,12 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import {
-  // generateImportFile,  // 已废弃，旧的一键生成入口
   getTable1Columns, getTemplateColumns,
-  // cancelGenerate,      // 已废弃，仅旧 generateImportFile 使用
   step1SplitOrders, step2aJoin, step2bDeleteUnmatched, step2cFillData, step2dRestoreStructure, step3MergeTemplates
 } from './service'
-import { listPresets, getPreset, savePreset, deletePreset } from './presetManager'
 
-export function registerKingdeeImportHandlers(mainWindow: BrowserWindow) {
-  ipcMain.handle('kingdee-import:listPresets', async () => {
-    try {
-      return { success: true, data: listPresets() }
-    } catch (error: any) {
-      return { success: false, error: error.message }
-    }
-  })
-
-  ipcMain.handle('kingdee-import:getPreset', async (_event, name: string) => {
-    try {
-      const preset = getPreset(name)
-      if (!preset) {
-        return { success: false, error: `预设 "${name}" 不存在` }
-      }
-      return { success: true, data: preset }
-    } catch (error: any) {
-      return { success: false, error: error.message }
-    }
-  })
-
-  ipcMain.handle('kingdee-import:savePreset', async (_event, config: any) => {
-    try {
-      savePreset(config)
-      return { success: true }
-    } catch (error: any) {
-      return { success: false, error: error.message }
-    }
-  })
-
-  ipcMain.handle('kingdee-import:deletePreset', async (_event, name: string) => {
-    try {
-      const deleted = deletePreset(name)
-      return { success: deleted, error: deleted ? undefined : `预设 "${name}" 不存在` }
-    } catch (error: any) {
-      return { success: false, error: error.message }
-    }
-  })
-
+// 说明：mainWindow 目前不再使用（旧的一键生成入口已废弃，进度改由前端分步轮询/日志呈现）。
+// 保留形参以兼容 registerIpcHandlers 的统一调用签名。
+export function registerKingdeeImportHandlers(_mainWindow: BrowserWindow) {
   ipcMain.handle('kingdee-import:getTable1Columns', async (_event, filePath: string) => {
     try {
       const columns = await getTable1Columns(filePath)
@@ -63,26 +24,6 @@ export function registerKingdeeImportHandlers(mainWindow: BrowserWindow) {
       return { success: false, error: error.message }
     }
   })
-
-  // ═════════════════════════════════════════════════════════════
-  // [已废弃] kingdee-import:generate / cancel
-  // 旧的一键生成入口，已被 step1~step3 逐步执行取代
-  // ═════════════════════════════════════════════════════════════
-  // ipcMain.handle('kingdee-import:generate', async (_event, params: { config: any }) => {
-  //   try {
-  //     const result = await generateImportFile(params.config, (progress) => {
-  //       mainWindow.webContents.send('kingdee-import:progress', progress)
-  //     })
-  //     return { success: true, data: result }
-  //   } catch (error: any) {
-  //     return { success: false, error: error.message }
-  //   }
-  // })
-  //
-  // ipcMain.handle('kingdee-import:cancel', async () => {
-  //   cancelGenerate()
-  //   return { success: true }
-  // })
 
   ipcMain.handle('kingdee-import:step1', async (_event, params: {
     table1Path: string
@@ -212,6 +153,7 @@ export function registerKingdeeImportHandlers(mainWindow: BrowserWindow) {
     outputDir: string
     outputPrefix: string
     textFormatColumns: string[]
+    transforms?: import('./transform').TransformRule[]
   }) => {
     try {
       const result = await step3MergeTemplates(
@@ -221,7 +163,8 @@ export function registerKingdeeImportHandlers(mainWindow: BrowserWindow) {
         params.templateDataStartRowIndex,
         params.outputDir,
         params.outputPrefix,
-        params.textFormatColumns
+        params.textFormatColumns,
+        params.transforms ?? []
       )
       return { success: true, data: result }
     } catch (error: any) {

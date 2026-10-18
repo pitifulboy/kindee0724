@@ -9,6 +9,9 @@ interface IpcResponse<T = any> {
   error?: string
 }
 
+/** 构建期由 vite define 注入的应用版本（取值 package.json.version，单一来源） */
+declare const __APP_VERSION__: string
+
 declare global {
   interface Window {
     electronAPI: {
@@ -20,26 +23,15 @@ declare global {
         openFolder: () => Promise<{ canceled: boolean; filePaths: string[] }>
       }
       excelMerge: {
-        listPresets: () => Promise<IpcResponse<any[]>>
-        getPreset: (name: string) => Promise<IpcResponse<any>>
-        savePreset: (config: any) => Promise<IpcResponse>
-        deletePreset: (name: string) => Promise<IpcResponse>
         getColumns: (filePath: string) => Promise<IpcResponse<string[]>>
+        getFileInfo: (filePath: string) => Promise<IpcResponse<{ sheetNames: string[]; headerColumns: string[] }>>
         merge: (params: any) => Promise<IpcResponse<any>>
+        joinAux: (params: any) => Promise<IpcResponse<any>>
         onProgress: (callback: (progress: any) => void) => () => void
-        cancel: () => Promise<IpcResponse>
       }
       kingdeeImport: {
-        listPresets: () => Promise<IpcResponse<any[]>>
-        getPreset: (name: string) => Promise<IpcResponse<any>>
-        savePreset: (config: any) => Promise<IpcResponse>
-        deletePreset: (name: string) => Promise<IpcResponse>
         getTable1Columns: (filePath: string) => Promise<IpcResponse<string[]>>
         getTemplateColumns: (filePath: string, headerRowIndex: number) => Promise<IpcResponse<string[]>>
-        // generate / onProgress / cancel 已废弃（旧 generateImportFile 入口），UI 改用 step1~step3 分步执行
-        // generate: (params: { config: any }) => Promise<IpcResponse<any>>
-        // onProgress: (callback: (progress: any) => void) => () => void
-        // cancel: () => Promise<IpcResponse>
         step1: (params: {
           table1Path: string
           groupByColumn: string
@@ -92,6 +84,15 @@ declare global {
           outputDir: string
           outputPrefix: string
           textFormatColumns: string[]
+          transforms?: {
+            id: string
+            targetColumn: string
+            op: 'textToNumber' | 'numberToText' | 'replace' | 'formula'
+            find?: string
+            replaceWith?: string
+            useRegex?: boolean
+            expr?: string
+          }[]
         }) => Promise<IpcResponse<any>>
       }
       app: {
@@ -103,11 +104,6 @@ declare global {
       shell: {
         openPath: (path: string) => Promise<IpcResponse>
         showItemInFolder: (path: string) => Promise<IpcResponse>
-      }
-      window: {
-        minimize: () => void
-        maximize: () => void
-        close: () => void
       }
       project: {
         list: () => Promise<IpcResponse<any[]>>

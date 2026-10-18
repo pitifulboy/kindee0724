@@ -6,19 +6,28 @@ export default {
   theme: {
     extend: {
       colors: {
-        // 主色取自参考图片中的青色 #60c7e0（primary-500）
+        // 主色统一为蓝色系（原 50~600 为青色、700/800 为蓝色，色相在 600→700 处断裂）。
+        // 各阶映射到 CSS 变量（默认值见 index.css :root），个人设置的配色方案运行时覆盖。
         primary: {
-          50: '#f0fafd',
-          100: '#d9f2f9',
-          200: '#b3e6f3',
-          300: '#80d6ea',
-          400: '#7dd0e6',
-          500: '#60c7e0',
-          600: '#3eaecb',
-          700: '#2563eb',
-          800: '#1d4ed8',
-          900: '#0e4d62',
-        }
+          50: 'var(--ui-primary-soft)',
+          100: 'var(--ui-primary-soft)',
+          200: 'var(--ui-primary-border)',
+          300: 'var(--ui-primary-300)',
+          400: 'var(--ui-primary-400)',
+          500: 'var(--ui-primary-500)',
+          600: 'var(--ui-primary-600)',
+          700: 'var(--ui-primary-hover)',
+          800: 'var(--ui-primary)',
+          900: 'var(--ui-primary-900)',
+        },
+        // 语义色（成功 / 警示 / 错误），供状态面板与 Toast 使用
+        success: {
+          50: '#f0fdf4',
+          100: '#dcfce7',
+          200: '#bbf7d0',
+          700: '#15803d',
+          800: '#166534',
+        },
       }
     },
   },

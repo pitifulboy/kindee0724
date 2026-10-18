@@ -18,6 +18,5 @@
       "@/*": ["src-electron/renderer/*"]
     }
   },
-  "include": ["src-electron/renderer"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": ["src-electron/renderer"]
 }

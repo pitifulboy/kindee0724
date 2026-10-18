@@ -48,6 +48,21 @@ async function main() {
   const publicIco = path.resolve(__dirname, '../public/icon.ico')
   const publicPng = path.resolve(__dirname, '../public/icon.png')
 
+  // 图标源缺失时兜底：若仓库中已有提交的 icon.ico，则沿用现有图标（构建可复现）；否则报错。
+  if (!fs.existsSync(src)) {
+    const existing = [buildIco, publicIco].filter(p => fs.existsSync(p))
+    if (existing.length > 0) {
+      console.warn(`⚠ 未找到图标源 ${src}`)
+      console.warn(`  已存在 ${existing.length} 个生成好的图标，跳过生成，沿用仓库现有图标。`)
+      console.warn('  如需重新生成，请把源图放到 icons/myicons.jpg 后再执行 npm run generate-icon。')
+      return
+    }
+    throw new Error(
+      `未找到图标源 ${src}，且仓库中没有可用的 icon.ico。\n` +
+      '请把源图放到 icons/myicons.jpg（或提交 build/icon.ico）后再构建。'
+    )
+  }
+
   const sizes = [16, 32, 48, 64, 128, 256]
 
   const pngBuffers = await Promise.all(sizes.map(s => createCircularIcon(src, s)))

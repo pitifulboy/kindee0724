@@ -9,7 +9,13 @@ import * as projectManager from '../modules/projectManager'
  * 注册所有IPC处理程序
  * @param mainWindow 主窗口实例（用于向渲染进程推送进度等）
  */
+let ipcRegistered = false
 export function registerIpcHandlers(mainWindow: BrowserWindow) {
+  // 防重复注册：ipcMain.handle 对同一通道重复注册会直接抛错，
+  // activate 路径重建窗口时不应再次注册。
+  if (ipcRegistered) return
+  ipcRegistered = true
+
   // 注册各业务模块的IPC处理程序
   registerExcelMergeHandlers(mainWindow)
   registerKingdeeImportHandlers(mainWindow)
@@ -43,8 +49,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
 
   // 在资源管理器中打开文件夹
   ipcMain.handle('shell:openPath', async (_event, folderPath: string) => {
-    await shell.openPath(folderPath)
-    return { success: true }
+    const errMsg = await shell.openPath(folderPath)
+    // shell.openPath 失败时返回非空错误字符串，必须透传，避免界面误报成功
+    return errMsg ? { success: false, error: errMsg } : { success: true }
   })
 
   ipcMain.handle('shell:showItemInFolder', async (_event, filePath: string) => {
@@ -52,16 +59,19 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
     return { success: true }
   })
 
-  // 扫描目录中的Excel文件（支持拖拽文件夹）
+  // 扫描目录中的表格文件（支持拖拽文件夹）
+  // 接受 .xlsx / .xls / .csv：读表已支持 xlsx（exceljs）、xls（SheetJS）、csv（文本解析）
+  const TABLE_EXTS = ['.xlsx', '.xls', '.csv']
+  const isTableFile = (name: string) => TABLE_EXTS.some(ext => name.toLowerCase().endsWith(ext))
   ipcMain.handle('file:listExcelFiles', async (_event, dirPath: string) => {
     try {
       const stat = fs.statSync(dirPath)
       if (stat.isDirectory()) {
         const files = fs.readdirSync(dirPath)
-          .filter(f => f.endsWith('.xlsx') || f.endsWith('.xls'))
+          .filter(f => isTableFile(f))
           .map(f => ({ path: path.join(dirPath, f), name: f }))
         return { success: true, data: files }
-      } else if (stat.isFile() && (dirPath.endsWith('.xlsx') || dirPath.endsWith('.xls'))) {
+      } else if (stat.isFile() && isTableFile(dirPath)) {
         const name = path.basename(dirPath)
         return { success: true, data: [{ path: dirPath, name }] }
       }
@@ -73,13 +83,13 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
 
   // ─── 项目管理 ───
   ipcMain.handle('project:list', async () => {
-    try { return { success: true, data: projectManager.listProjects() } }
+    try { return { success: true, data: await projectManager.listProjects() } }
     catch (error: any) { return { success: false, error: error.message } }
   })
 
   ipcMain.handle('project:get', async (_event, id: string) => {
     try {
-      const project = projectManager.getProject(id)
+      const project = await projectManager.getProject(id)
       if (!project) return { success: false, error: `项目 "${id}" 不存在` }
       return { success: true, data: project }
     } catch (error: any) { return { success: false, error: error.message } }
@@ -123,7 +133,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
   // ─── 项目导入 / 导出 ───
   ipcMain.handle('project:export', async () => {
     try {
-      const data = projectManager.exportProjects()
+      const data = await projectManager.exportProjects()
       if (Object.keys(data).length === 0) {
         return { success: false, error: '暂无项目可导出' }
       }

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import SearchableSelect from '../SearchableSelect'
+import { visualization as v, combinedPage as t } from '../../config/appText'
 
 /**
  * 界面2 · 合并表 LEFT JOIN 辅助表（Power BI 风格建模视图）
@@ -58,8 +59,6 @@ interface LeftJoinModelViewProps {
   leftFieldLabel?: string
   /** 无辅助表时的空态提示 */
   emptyText?: string
-  /** 辅助表表头右侧徽标文字；提供时替代「连接方式」下拉（如字段映射场景显示「字段映射」） */
-  auxHeaderBadge?: string
 }
 
 // ── 布局常量（SVG 用户坐标）──
@@ -84,9 +83,9 @@ const LEFT_X = PAD
 const RIGHT_X = PAD + CARD_W + COL_GAP
 const CANVAS_W = RIGHT_X + CARD_W + PAD
 
-const KEY_FILL = '#d9f2f9'   // primary-100，匹配键高亮底色
+const KEY_FILL = '#dbeafe'   // primary-100，匹配键高亮底色
 const HOVER_FILL = '#d1fae5' // 拖拽目标高亮（浅绿）
-const LINE_COLOR = '#1d4ed8' // primary-800，关联线
+const LINE_COLOR = '#1d4ed8' // primary-700，关联线
 const DIM_LINE = '#a5c4f7'   // 端点滚出视野时的淡化连线
 const CONNECT_COLOR = '#10b981' // 拖拽建立关联时的提示色
 
@@ -122,9 +121,9 @@ const curve = (x1: number, y1: number, x2: number, y2: number) => {
 }
 
 const JOIN_OPTIONS: { value: 'left' | 'inner' | 'right'; label: string }[] = [
-  { value: 'left', label: 'Left Join' },
-  { value: 'inner', label: 'Inner Join' },
-  { value: 'right', label: 'Right Join' },
+  { value: 'left', label: t.joinLeft },
+  { value: 'inner', label: t.joinInner },
+  { value: 'right', label: t.joinRight },
 ]
 
 /** 卡片内「本表字段搜索」输入框样式（foreignObject 内，px 即 SVG 用户单位） */
@@ -133,7 +132,7 @@ const cardSearchStyle: React.CSSProperties = {
   height: SEARCH_H - 6,
   display: 'block',
   boxSizing: 'border-box',
-  fontSize: 11,
+  fontSize: 12,
   padding: '0 6px',
   border: '1px solid #e5e7eb',
   borderRadius: 4,
@@ -148,7 +147,7 @@ const joinSelectStyle: React.CSSProperties = {
   height: HDR_H - 10,
   display: 'block',
   boxSizing: 'border-box',
-  fontSize: 11,
+  fontSize: 12,
   padding: '0 4px',
   border: '1px solid #d1d5db',
   borderRadius: 4,
@@ -203,11 +202,10 @@ interface CardGeom {
 
 const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
   mergedColumns, auxTables, auxColumnsMap, onChangeMatchPair, onConnect, onRemoveMatchPair, onChangeJoinType,
-  leftTitle = '合并表',
-  toolbarTitle = '合并表 Left Join 辅助表',
-  leftFieldLabel = '合并表',
-  emptyText = '尚未添加辅助表，请先在「辅助表配置」中添加',
-  auxHeaderBadge,
+  leftTitle = v.leftJoinLeftTitleDefault,
+  toolbarTitle = v.leftJoinToolbarDefault,
+  leftFieldLabel = v.leftJoinLeftLabelDefault,
+  emptyText = v.leftJoinEmptyDefault,
 }) => {
   const [editing, setEditing] = useState<{ auxId: string; pairIndex: number } | null>(null)
   const [draftOrderCol, setDraftOrderCol] = useState('')
@@ -223,10 +221,13 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
   const [query, setQuery] = useState('')
   /** 每张卡片自己的字段搜索：key = 'left' | aux.id */
   const [cardQuery, setCardQuery] = useState<Record<string, string>>({})
+  /** 建模视图定位为「检查配置」界面：默认隐藏未使用（未参与匹配/映射）的字段 */
+  const [hideUnused, setHideUnused] = useState(true)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const moveRef = useRef<MoveState | null>(null)
   const geomRef = useRef<{ left: CardGeom; cards: CardGeom[] } | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
 
   // 被 matchPairs 引用的匹配键集合
   const keyCols = useMemo(() => {
@@ -240,10 +241,16 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
   const cardQ = (id: string) => (cardQuery[id] || '').trim().toLowerCase()
   const leftQ = cardQ('left') || q
 
-  const leftColsRaw = useMemo(
-    () => (leftQ ? mergedColumns.filter(c => c.toLowerCase().includes(leftQ)) : mergedColumns),
-    [leftQ, mergedColumns],
-  )
+  const leftColsRaw = useMemo(() => {
+    let cols = mergedColumns
+    if (leftQ) {
+      cols = cols.filter(c => c.toLowerCase().includes(leftQ))
+    } else if (hideUnused) {
+      // 仅显示参与匹配的字段（无搜索词时才隐藏未使用字段）
+      cols = cols.filter(c => keyCols.has(c))
+    }
+    return cols
+  }, [leftQ, mergedColumns, hideUnused, keyCols])
   // 关联字段（匹配键）上浮到最上端
   const leftCols = useMemo(
     () => keyFirst(leftColsRaw, c => keyCols.has(c)),
@@ -268,9 +275,15 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
     return auxTables.map(aux => {
       const all = (auxColumnsMap[aux.id] || []).filter(Boolean)
       const cq = (cardQuery[aux.id] || '').trim().toLowerCase() || q
-      const filtered = cq ? all.filter(c => c.toLowerCase().includes(cq)) : all
+      const isUsed = (c: string) => aux.matchPairs.some(p => p.auxCol === c)
+      let filtered = all
+      if (cq) {
+        filtered = all.filter(c => c.toLowerCase().includes(cq))
+      } else if (hideUnused) {
+        filtered = all.filter(isUsed)
+      }
       // 关联字段（匹配键）上浮到最上端
-      const cols = keyFirst(filtered, c => aux.matchPairs.some(p => p.auxCol === c))
+      const cols = keyFirst(filtered, isUsed)
       const contentH = viewHOf(cols.length)
       const expanded = expandAll || !!cardExpand[aux.id]
       const visRows = expanded ? Math.max(cols.length, 1) : Math.min(Math.max(cols.length, 1), MAX_VISIBLE_ROWS)
@@ -285,7 +298,7 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
       const scrollTop = clamp(scroll[aux.id] || 0, 0, Math.max(0, contentH - viewH))
       return { aux, cols, contentH, visRows, viewH, cardH, defY, x, y, scrollTop, cq, expanded, hasFoot }
     })
-  }, [auxTables, auxColumnsMap, q, cardQuery, pos, scroll, expandAll, cardExpand])
+  }, [auxTables, auxColumnsMap, q, cardQuery, pos, scroll, expandAll, cardExpand, hideUnused])
 
   const matchCount = useMemo(() => {
     if (!q) return 0
@@ -395,6 +408,17 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
     svg.addEventListener('wheel', handler, { passive: false })
     return () => svg.removeEventListener('wheel', handler)
   }, [])
+
+  // 修改关联关系面板：打开时聚焦面板，Esc 关闭
+  useEffect(() => {
+    if (!editing) return
+    panelRef.current?.focus()
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setEditing(null) }
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [editing])
 
   /** 命中测试：返回鼠标所在字段行 */
   const hitTest = (x: number, y: number): { side: Side; auxId?: string; col: string } | null => {
@@ -584,8 +608,8 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
         }}
       >
         <path d={footerPath(x, fy, CARD_W, FOOT_H)} fill="#f3f4f6" stroke="#e5e7eb" strokeWidth={1} />
-        <text x={x + CARD_W / 2} y={fy + FOOT_H / 2} textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={500} fill="#1d4ed8">
-          {expanded ? '收起字段 ▴' : `展开全部 ${total} 个字段 ▾`}
+        <text x={x + CARD_W / 2} y={fy + FOOT_H / 2} textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight={500} fill="#1d4ed8">
+          {expanded ? v.footerCollapse : v.footerExpand(total)}
         </text>
       </g>
     )
@@ -596,21 +620,25 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
       <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
         <span className="text-sm font-semibold text-black">{toolbarTitle}</span>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1" title="缩放建模画布">
+          <div className="flex items-center gap-1" role="group" aria-label={v.zoomTitle}>
             <button
               type="button"
               onClick={() => setZoom(z => clamp(+((z - ZOOM_STEP).toFixed(2)), ZOOM_MIN, ZOOM_MAX))}
               disabled={zoom <= ZOOM_MIN}
-              className="w-6 h-6 flex items-center justify-center text-sm text-black border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="缩小"
+              title="缩小"
+              className="w-7 h-7 flex items-center justify-center text-sm text-black border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed focus-ring"
             >
               －
             </button>
-            <span className="w-12 text-center text-xs text-black tabular-nums">{Math.round(zoom * 100)}%</span>
+            <span className="w-12 text-center text-xs text-black tabular-nums" aria-live="polite">{Math.round(zoom * 100)}%</span>
             <button
               type="button"
               onClick={() => setZoom(z => clamp(+((z + ZOOM_STEP).toFixed(2)), ZOOM_MIN, ZOOM_MAX))}
               disabled={zoom >= ZOOM_MAX}
-              className="w-6 h-6 flex items-center justify-center text-sm text-black border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="放大"
+              title="放大"
+              className="w-7 h-7 flex items-center justify-center text-sm text-black border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed focus-ring"
             >
               ＋
             </button>
@@ -618,32 +646,38 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
               type="button"
               onClick={() => setZoom(1)}
               disabled={zoom === 1}
-              className="px-2 h-6 text-xs text-black border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="px-2 h-7 text-sm text-black border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed focus-ring"
             >
-              复位
+              {v.zoomReset}
             </button>
           </div>
-          <label className="flex items-center gap-1 text-xs text-black cursor-pointer select-none" title="一次展开所有卡片的全部字段">
-            <input type="checkbox" checked={expandAll} onChange={e => setExpandAll(e.target.checked)} />
-            全部展开字段
+          <label className="flex items-center gap-1.5 text-xs text-black cursor-pointer select-none" title={v.expandAllTitle}>
+            <input type="checkbox" className="w-4 h-4" checked={expandAll} onChange={e => setExpandAll(e.target.checked)} />
+            {v.expandAllLabel}
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-black cursor-pointer select-none" title={v.hideUnusedTitle}>
+            <input type="checkbox" className="w-4 h-4" checked={hideUnused} onChange={e => setHideUnused(e.target.checked)} />
+            {v.hideUnusedLabel}
           </label>
           <div className="relative w-56">
-            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-black pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder="搜索字段…"
-              className="w-full pl-8 pr-7 py-1.5 text-xs text-black border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-transparent"
+              placeholder={v.searchPlaceholder}
+              aria-label={v.searchPlaceholder}
+              className="w-full pl-8 pr-7 py-1.5 text-sm text-black border border-gray-200 rounded-md focus-ring"
             />
             {query && (
               <button
                 type="button"
                 onClick={() => setQuery('')}
-                title="清除搜索"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-gray-400 hover:text-gray-600"
+                aria-label={v.searchClear}
+                title={v.searchClear}
+                className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center text-black hover:bg-gray-100 rounded focus-ring"
               >
                 ×
               </button>
@@ -653,8 +687,8 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
       </div>
 
       {q && (
-        <p className="text-xs text-black mb-2">
-          {matchCount > 0 ? `匹配到 ${matchCount} 个字段（仅显示匹配项，连线按匹配结果展示）` : '无匹配字段'}
+        <p className="text-xs text-black mb-2" aria-live="polite">
+          {matchCount > 0 ? v.matchCount(matchCount) : v.noMatchFields}
         </p>
       )}
 
@@ -681,7 +715,7 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
           {/* ── 左：合并表 ── */}
           <rect x={leftX} y={leftY} width={CARD_W} height={leftH} rx={10} fill="#ffffff" stroke="#e5e7eb" strokeWidth={1} />
           {renderHeader('left', leftX, leftY, leftTitle, (
-            <text x={leftX + CARD_W - 12} y={leftY + HDR_H / 2} textAnchor="end" dominantBaseline="central" fontSize={11} fill="#000000">{mergedColumns.length} 字段</text>
+            <text x={leftX + CARD_W - 12} y={leftY + HDR_H / 2} textAnchor="end" dominantBaseline="central" fontSize={12} fill="#000000">{`${keyCols.size}/${mergedColumns.length}`}</text>
           ))}
 
           {/* 本表字段搜索 */}
@@ -691,14 +725,14 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
               style={cardSearchStyle}
               value={cardQuery.left || ''}
               onChange={e => setCardQuery(s => ({ ...s, left: e.target.value }))}
-              placeholder="搜索本表字段…"
+              placeholder={v.cardSearchPlaceholder}
             />
           </foreignObject>
 
           <g clipPath="url(#viz-clip-left)">
             {leftCols.length === 0 ? (
-              <text x={leftX + 14} y={rowYOf(leftY, 0, 0)} dominantBaseline="central" fontSize={11} fill="#000000">
-                {leftQ ? '（无匹配字段）' : `（未读取到${leftFieldLabel}字段）`}
+              <text x={leftX + 14} y={rowYOf(leftY, 0, 0)} dominantBaseline="central" fontSize={12} fill="#000000">
+                {leftQ ? v.noMatchField : (hideUnused ? v.noUsedFieldsLeft(leftFieldLabel) : v.noColumnsOf(leftFieldLabel))}
               </text>
             ) : (
               leftCols.map((col, i) => renderRow(
@@ -717,22 +751,18 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
             <g key={card.aux.id}>
               <rect x={card.x} y={card.y} width={CARD_W} height={card.cardH} rx={10} fill="#ffffff" stroke="#e5e7eb" strokeWidth={1} />
               {renderHeader(card.aux.id, card.x, card.y, card.aux.name, (
-                auxHeaderBadge ? (
-                  <text x={card.x + CARD_W - 12} y={card.y + HDR_H / 2} textAnchor="end" dominantBaseline="central" fontSize={11} fill="#000000">{auxHeaderBadge}</text>
-                ) : (
-                  <foreignObject x={card.x + CARD_W - 100} y={card.y + 5} width={88} height={HDR_H - 10}>
-                    <select
-                      value={card.aux.how}
-                      title="连接方式"
-                      disabled={!onChangeJoinType}
-                      onPointerDown={e => e.stopPropagation()}
-                      onChange={e => onChangeJoinType?.(card.aux.id, e.target.value as 'left' | 'inner' | 'right')}
-                      style={joinSelectStyle}
-                    >
-                      {JOIN_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </foreignObject>
-                )
+                <foreignObject x={card.x + CARD_W - 100} y={card.y + 5} width={88} height={HDR_H - 10}>
+                  <select
+                    value={card.aux.how}
+                    title={v.joinType}
+                    disabled={!onChangeJoinType}
+                    onPointerDown={e => e.stopPropagation()}
+                    onChange={e => onChangeJoinType?.(card.aux.id, e.target.value as 'left' | 'inner' | 'right')}
+                    style={joinSelectStyle}
+                  >
+                    {JOIN_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </foreignObject>
               ))}
 
               {/* 本表字段搜索 */}
@@ -742,14 +772,14 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
                   style={cardSearchStyle}
                   value={cardQuery[card.aux.id] || ''}
                   onChange={e => setCardQuery(s => ({ ...s, [card.aux.id]: e.target.value }))}
-                  placeholder="搜索本表字段…"
+                  placeholder={v.cardSearchPlaceholder}
                 />
               </foreignObject>
 
               <g clipPath={`url(#viz-clip-${card.aux.id})`}>
                 {card.cols.length === 0 ? (
-                  <text x={card.x + 14} y={rowYOf(card.y, 0, 0)} dominantBaseline="central" fontSize={11} fill="#000000">
-                    {card.cq ? '（无匹配字段）' : '（未读取到字段）'}
+                  <text x={card.x + 14} y={rowYOf(card.y, 0, 0)} dominantBaseline="central" fontSize={12} fill="#000000">
+                    {card.cq ? v.noMatchField : (hideUnused ? v.noUsedFieldsRight : v.noColumns)}
                   </text>
                 ) : (
                   card.cols.map((col, i) => renderRow(
@@ -797,9 +827,9 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
 
           {/* ── 图例 ── */}
           <circle cx={LEFT_X + 4} cy={legendY} r={4} fill={LINE_COLOR} />
-          <text x={LEFT_X + 16} y={legendY} dominantBaseline="central" fontSize={11} fill="#000000">匹配键（关联依据），两端加粗高亮</text>
-          <text x={CANVAS_W - PAD} y={legendY} textAnchor="end" dominantBaseline="central" fontSize={11} fill="#000000">
-            表头拖动卡片·切换连接方式 · 卡内滚轮滑动字段 · 底部展开/收起 · 拖拽字段连线 · 双击连线修改
+          <text x={LEFT_X + 16} y={legendY} dominantBaseline="central" fontSize={12} fill="#000000">{v.legendKey}</text>
+          <text x={CANVAS_W - PAD} y={legendY} textAnchor="end" dominantBaseline="central" fontSize={12} fill="#000000">
+            {v.legendHint}
           </text>
         </svg>
       </div>
@@ -807,30 +837,38 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
       {/* ── 修改关联关系面板 ── */}
       {editing && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/20" onClick={() => setEditing(null)}>
-          <div className="bg-white rounded-xl shadow-2xl w-80" onClick={e => e.stopPropagation()}>
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={v.editPairTitle}
+            tabIndex={-1}
+            className="bg-white rounded-xl shadow-2xl w-80 focus:outline-none"
+            onClick={e => e.stopPropagation()}
+          >
             <div className="px-4 py-3 border-b border-gray-100 rounded-t-xl">
-              <span className="text-sm font-semibold text-black">修改关联关系</span>
+              <span className="text-sm font-semibold text-black">{v.editPairTitle}</span>
             </div>
             <div className="p-4 space-y-3">
               <div>
-                <label className="block text-xs text-black mb-1">{leftFieldLabel}字段</label>
+                <label className="block text-xs text-black mb-1">{v.editLeftField(leftFieldLabel)}</label>
                 <SearchableSelect
                   value={draftOrderCol}
                   options={mergedColumns}
                   onChange={setDraftOrderCol}
-                  placeholder="— 选择字段 —"
+                  placeholder={v.editFieldPlaceholder}
+                  ariaLabel={v.editLeftField(leftFieldLabel)}
                 />
               </div>
-              <div className="text-center text-xs text-black">＝</div>
+              <div className="text-center text-xs text-black" aria-hidden="true">＝</div>
               <div>
-                <label className="block text-xs text-black mb-1">
-                  辅助表字段{editingAux ? `（${editingAux.name}）` : ''}
-                </label>
+                <label className="block text-xs text-black mb-1">{v.editAuxField(editingAux?.name)}</label>
                 <SearchableSelect
                   value={draftAuxCol}
                   options={editingAuxCols}
                   onChange={setDraftAuxCol}
-                  placeholder="— 选择字段 —"
+                  placeholder={v.editFieldPlaceholder}
+                  ariaLabel={v.editAuxField(editingAux?.name)}
                 />
               </div>
             </div>
@@ -838,23 +876,23 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
               {onRemoveMatchPair ? (
                 <button
                   onClick={confirmRemove}
-                  className="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded hover:bg-red-50"
+                  className="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded hover:bg-red-50 focus-ring"
                 >
-                  删除关联
+                  {v.removePair}
                 </button>
               ) : <span />}
               <div className="flex space-x-2">
                 <button
                   onClick={() => setEditing(null)}
-                  className="px-3 py-1.5 text-sm text-black border border-gray-200 rounded hover:bg-gray-50"
+                  className="px-3 py-1.5 text-sm text-black border border-gray-200 rounded hover:bg-gray-50 focus-ring"
                 >
-                  取消
+                  {v.cancel}
                 </button>
                 <button
                   onClick={confirmEdit}
-                  className="px-3 py-1.5 text-sm font-medium text-white bg-primary-800 rounded hover:bg-primary-700"
+                  className="btn-press px-3 py-1.5 text-sm font-medium text-white bg-primary-800 rounded hover:bg-primary-700 focus-ring"
                 >
-                  确定
+                  {v.confirm}
                 </button>
               </div>
             </div>

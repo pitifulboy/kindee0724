@@ -132,10 +132,14 @@ const Sidebar: React.FC<SidebarProps> = ({
   }
 
   return (
-    <aside ref={sidebarRef} className="relative bg-white border-l border-gray-100 flex flex-col h-full flex-shrink-0" style={{ width: sidebarWidth }}>
+    <aside ref={sidebarRef} aria-label={t.projectListTitle}
+      className="relative bg-white border-l border-gray-100 flex flex-col h-full flex-shrink-0" style={{ width: sidebarWidth }}>
 
       {/* 左侧拖拽手柄 */}
       <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整侧栏宽度"
         className={`absolute left-0 top-0 bottom-0 w-1 z-20 cursor-col-resize transition-colors ${
           isResizing ? 'bg-primary-500' : 'hover:bg-primary-400'
         }`}
@@ -145,11 +149,12 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* 项目列表 */}
       <nav className="flex-1 px-3 py-4 overflow-y-auto">
         <div className="flex items-center justify-between mb-3 px-2">
-          <p className="text-[10px] font-semibold text-black uppercase tracking-wider">{t.projectListTitle}</p>
+          <p className="text-xs font-semibold text-black uppercase tracking-wider">{t.projectListTitle}</p>
           <button onClick={onAddProject}
-            className="p-1 text-black hover:text-white hover:bg-primary-700 rounded transition-colors"
+            className="p-1 text-black hover:text-white hover:bg-primary-700 rounded transition-colors focus-ring"
+            aria-label={t.newProjectTitle}
             title={t.newProjectTitle}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
           </button>
@@ -167,7 +172,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             const isActive = activeProjectId === project.id
             const isEditing = editingId === project.id
             const lastModified = project.updatedAt
-              ? new Date(project.updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+              ? new Date(project.updatedAt).toLocaleDateString(appText.locale, { month: 'short', day: 'numeric' })
               : ''
 
             return (
@@ -184,7 +189,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onChange={e => setEditName(e.target.value)}
                     onBlur={handleFinishRename}
                     onKeyDown={handleKeyDown}
-                    className="flex-1 mx-2 my-1.5 px-3 py-2 text-sm bg-white border border-primary-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-400"
+                    aria-label={t.renameTitle}
+                    className="flex-1 mx-2 my-1.5 px-3 py-2 text-sm bg-white border border-primary-300 rounded-lg focus:outline-none focus-visible:ring-1 focus-visible:ring-primary-400"
                     autoFocus
                     onClick={e => e.stopPropagation()}
                   />
@@ -192,11 +198,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <button
                     onClick={() => onSelectProject(project.id)}
                     onContextMenu={(e) => handleContextMenu(e, project.id)}
-                    className="flex-1 flex items-center px-3 py-2.5 text-left min-w-0"
+                    className="flex-1 flex items-center px-3 py-2.5 text-left min-w-0 rounded-lg focus-ring"
                   >
                     {/* 项目图标 */}
                     <svg className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-white' : 'text-black'}`}
-                      fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                         d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                     </svg>
@@ -205,7 +211,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                         {project.name}
                       </p>
                       {lastModified && (
-                        <p className="text-[10px] text-white">{lastModified}</p>
+                        /* 选中项为蓝底（白字），未选中为白底，必须黑字，否则白底白字不可见 */
+                        <p className={`text-xs ${isActive ? 'text-white' : 'text-black'}`}>{lastModified}</p>
                       )}
                     </div>
                   </button>
@@ -213,23 +220,25 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                 {/* 操作按钮（hover显示）- 固定在右侧并预留给宽 */}
                 {!isEditing && (
-                  <div className="flex items-center pr-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                  <div className="flex items-center pr-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex-shrink-0">
                     <button
                       onClick={(e) => { e.stopPropagation(); handleStartRename(project.id, project.name) }}
-                      className="p-1.5 text-black hover:text-white hover:bg-primary-700 rounded-md"
+                      className="p-1.5 text-black hover:text-white hover:bg-primary-700 rounded-md focus-ring"
+                      aria-label={`${t.renameTitle}：${project.name}`}
                       title={t.renameTitle}
                     >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                           d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                       </svg>
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); onDeleteProject(project.id) }}
-                      className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md"
+                      className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md focus-ring"
+                      aria-label={`${t.deleteTitle}：${project.name}`}
                       title={t.deleteTitle}
                     >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                           d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                       </svg>
@@ -243,25 +252,25 @@ const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       {/* 底部 — 导入 / 导出 */}
-      <div ref={dropRef} className={`px-3 py-3 border-t border-gray-50 space-y-1.5 transition-colors ${draggingOver ? 'bg-primary-800 border-primary-300' : ''}`}>
+      <div ref={dropRef} className={`px-3 py-3 border-t border-gray-50 space-y-1.5 transition-colors ${draggingOver ? 'bg-primary-50 border-primary-300' : ''}`}>
         {draggingOver && (
-          <div className="text-[11px] text-black font-medium text-center mb-1">
+          <div className="text-xs text-black font-medium text-center mb-1">
             {t.importFromFileHint}
           </div>
         )}
         <div className="flex items-center space-x-1.5">
-          <div className="w-2 h-2 rounded-full bg-primary-500" />
-          <span className="text-[11px] text-black">{appText.statusRunning}</span>
+          <div className="w-2 h-2 rounded-full bg-success-700" />
+          <span className="text-xs text-black">{appText.statusRunning}</span>
           <div className="flex-1" />
-          <span className="text-[11px] text-black">{appText.version}</span>
+          <span className="text-xs text-black">{appText.version}</span>
         </div>
         <div className="flex space-x-1">
           <button
             onClick={onImportProjects}
             disabled={isImporting}
-            className="flex-1 flex items-center justify-center px-2 py-1.5 text-[11px] text-black border border-gray-200 rounded hover:bg-gray-50 hover:text-black disabled:cursor-not-allowed transition-colors"
+            className="flex-1 flex items-center justify-center px-2 py-1.5 text-sm text-black border border-gray-200 rounded hover:bg-gray-50 hover:text-black disabled:cursor-not-allowed transition-colors focus-ring"
             title={t.importPresetTitle}>
-            <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
             </svg>
             {t.importBtn}
@@ -269,9 +278,9 @@ const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={onExportProjects}
             disabled={isImporting}
-            className="flex-1 flex items-center justify-center px-2 py-1.5 text-[11px] text-black border border-gray-200 rounded hover:bg-gray-50 hover:text-black disabled:cursor-not-allowed transition-colors"
+            className="flex-1 flex items-center justify-center px-2 py-1.5 text-sm text-black border border-gray-200 rounded hover:bg-gray-50 hover:text-black disabled:cursor-not-allowed transition-colors focus-ring"
             title={t.exportPresetTitle}>
-            <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
             {t.exportBtn}
@@ -283,14 +292,16 @@ const Sidebar: React.FC<SidebarProps> = ({
       {contextMenu && (
         <div
           ref={contextMenuRef}
+          role="menu"
           className="fixed z-50 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px]"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
+            role="menuitem"
             onClick={handleCopyFromMenu}
             className="w-full flex items-center px-3 py-2 text-sm text-black hover:bg-primary-700 hover:text-white transition-colors text-left"
           >
-            <svg className="w-4 h-4 mr-2 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 mr-2 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
             {t.copyProject}

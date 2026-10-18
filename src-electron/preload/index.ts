@@ -26,31 +26,24 @@ const electronAPI = {
 
   // ─── Excel批量合并 ───
   excelMerge: {
-    // 预设管理
-    listPresets: (): Promise<IpcResponse<any[]>> => {
-      return ipcRenderer.invoke('excel-merge:listPresets')
-    },
-
-    getPreset: (name: string): Promise<IpcResponse<any>> => {
-      return ipcRenderer.invoke('excel-merge:getPreset', name)
-    },
-
-    savePreset: (config: any): Promise<IpcResponse> => {
-      return ipcRenderer.invoke('excel-merge:savePreset', config)
-    },
-
-    deletePreset: (name: string): Promise<IpcResponse> => {
-      return ipcRenderer.invoke('excel-merge:deletePreset', name)
-    },
-
     // 字段发现
     getColumns: (filePath: string): Promise<IpcResponse<string[]>> => {
       return ipcRenderer.invoke('excel-merge:getColumns', filePath)
     },
 
+    // 工作表名 + 首行列名（合并前一致性检测用）
+    getFileInfo: (filePath: string): Promise<IpcResponse<{ sheetNames: string[]; headerColumns: string[] }>> => {
+      return ipcRenderer.invoke('excel-merge:getFileInfo', filePath)
+    },
+
     // 合并执行
     merge: (params: any): Promise<IpcResponse<any>> => {
       return ipcRenderer.invoke('excel-merge:merge', params)
+    },
+
+    // 第 2 步独立执行：合并辅助表
+    joinAux: (params: any): Promise<IpcResponse<any>> => {
+      return ipcRenderer.invoke('excel-merge:joinAux', params)
     },
 
     onProgress: (callback: (progress: any) => void): (() => void) => {
@@ -59,45 +52,17 @@ const electronAPI = {
       return () => {
         ipcRenderer.removeListener('excel-merge:progress', handler)
       }
-    },
-
-    cancel: (): Promise<IpcResponse> => {
-      return ipcRenderer.invoke('excel-merge:cancel')
     }
   },
 
   // ─── 金蝶导入 ───
   kingdeeImport: {
-    listPresets: (): Promise<IpcResponse<any[]>> => {
-      return ipcRenderer.invoke('kingdee-import:listPresets')
-    },
-    getPreset: (name: string): Promise<IpcResponse<any>> => {
-      return ipcRenderer.invoke('kingdee-import:getPreset', name)
-    },
-    savePreset: (config: any): Promise<IpcResponse> => {
-      return ipcRenderer.invoke('kingdee-import:savePreset', config)
-    },
-    deletePreset: (name: string): Promise<IpcResponse> => {
-      return ipcRenderer.invoke('kingdee-import:deletePreset', name)
-    },
     getTable1Columns: (filePath: string): Promise<IpcResponse<string[]>> => {
       return ipcRenderer.invoke('kingdee-import:getTable1Columns', filePath)
     },
     getTemplateColumns: (filePath: string, headerRowIndex: number): Promise<IpcResponse<string[]>> => {
       return ipcRenderer.invoke('kingdee-import:getTemplateColumns', filePath, headerRowIndex)
     },
-    // generate / onProgress / cancel 已废弃（旧 generateImportFile 入口），UI 改用 step1~step3 分步执行
-    // generate: (params: { config: any }): Promise<IpcResponse<any>> => {
-    //   return ipcRenderer.invoke('kingdee-import:generate', params)
-    // },
-    // onProgress: (callback: (progress: any) => void): (() => void) => {
-    //   const handler = (_event: unknown, progress: any) => callback(progress)
-    //   ipcRenderer.on('kingdee-import:progress', handler)
-    //   return () => { ipcRenderer.removeListener('kingdee-import:progress', handler) }
-    // },
-    // cancel: (): Promise<IpcResponse> => {
-    //   return ipcRenderer.invoke('kingdee-import:cancel')
-    // },
     step1: (params: {
       table1Path: string
       groupByColumn: string
@@ -187,13 +152,6 @@ const electronAPI = {
     showItemInFolder: (path: string): Promise<IpcResponse> => {
       return ipcRenderer.invoke('shell:showItemInFolder', path)
     }
-  },
-
-  // ─── 窗口控制 ───
-  window: {
-    minimize: () => ipcRenderer.send('window:minimize'),
-    maximize: () => ipcRenderer.send('window:maximize'),
-    close: () => ipcRenderer.send('window:close'),
   },
 
   // ─── 项目管理 ───

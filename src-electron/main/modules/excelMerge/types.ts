@@ -44,6 +44,15 @@ export interface MergeParams {
   outputDir: string                  // 输出目录
 }
 
+// 合并辅助表参数（第 2 步独立执行时传入）
+export interface JoinAuxParams {
+  inputPath: string                  // 第 1 步「合并原表」产物路径
+  auxFilePaths: Record<string, string>  // 辅助表ID → 完整文件路径
+  config: PresetConfig               // 预设配置（使用 auxiliaryTables / outputFileName）
+  outputDir: string                  // 输出目录
+  outputFileName?: string            // 覆盖输出文件名（默认取 config.outputFileName）
+}
+
 // 合并进度
 export interface ExcelMergeProgress {
   step: string                       // 当前步骤描述
@@ -62,11 +71,4 @@ export interface ExcelMergeResult {
   totalColumns: number               // 总列数
   matchedCount: number               // 匹配成功行数
   unmatchedCount: number             // 未匹配行数
-}
-
-// 预设列表项
-export interface PresetListItem {
-  name: string
-  auxiliaryTableCount: number
-  lastModified: string               // ISO 时间戳
 }

@@ -1,104 +1,21 @@
 /**
  * Excel 合并核心服务
  * 使用 exceljs 读取 Excel → 数据 join → 输出 Excel
+ *
+ * 读表 / 取值 / 清洗 / 写盘等通用逻辑见 ../../shared/excel。
  */
 import * as fs from 'fs'
 import * as path from 'path'
 import ExcelJS from 'exceljs'
+import { clean, readColumnsAtRow, readTable, readWorkbookMeta, writeWorkbookSafe } from '../../shared/excel'
+import type { WorkbookMeta } from '../../shared/excel'
 import type {
   MergeParams,
+  JoinAuxParams,
   ExcelMergeProgress,
   ExcelMergeResult,
-  PresetConfig,
   AuxTableConfig
 } from './types'
-
-let isCancelled = false
-
-/**
- * 写入 Excel 工作簿到目标路径（先写 temp 再拷贝，避免安全软件拦截）
- */
-async function writeWorkbookSafe(wb: ExcelJS.Workbook, targetPath: string): Promise<void> {
-  const tmpDir = path.join(require('electron').app.getPath('temp'), 'excel-merge-write-cache')
-  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
-  const tmpPath = path.join(tmpDir, `__tmp_${Date.now()}_${Math.random().toString(36).slice(2)}.xlsx`)
-  try {
-    await wb.xlsx.writeFile(tmpPath)
-    fs.copyFileSync(tmpPath, targetPath)
-  } finally {
-    try { fs.unlinkSync(tmpPath) } catch { /* ignore */ }
-  }
-}
-
-/**
- * 读取 Excel 文件为行数据数组
- * 返回：{ columns: string[], rows: Record<string, any>[] }
- */
-async function readExcel(
-  filePath: string,
-  onProgress?: (msg: string) => void
-): Promise<{ columns: string[]; rows: Record<string, any>[] }> {
-  const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.readFile(filePath)
-  const sheet = workbook.worksheets[0]
-  if (!sheet) {
-    throw new Error(`文件 ${path.basename(filePath)} 没有工作表`)
-  }
-
-  // 读取表头（第一行）
-  const headerRow = sheet.getRow(1)
-  const columns: string[] = []
-  headerRow.eachCell((cell, colNumber) => {
-    columns[colNumber - 1] = String(cell.value || '').trim()
-  })
-  // 过滤掉末尾空列
-  const lastNonEmpty = columns.reduce((last, val, i) => val ? i : last, -1)
-  const validColumns = columns.slice(0, lastNonEmpty + 1)
-
-  // 读取数据行
-  const rows: Record<string, any>[] = []
-  for (let r = 2; r <= sheet.rowCount; r++) {
-    const row = sheet.getRow(r)
-    const rowData: Record<string, any> = {}
-    let hasData = false
-    validColumns.forEach((col, i) => {
-      // exceljs 的 getCell 是 1-based，第一列是 getCell(1)
-      const cell = row.getCell(i + 1)
-      const val = cell.value
-      // 处理 exceljs 的单元格值类型
-      let processedVal: any = val
-      if (val && typeof val === 'object' && 'text' in val) {
-        processedVal = (val as any).text
-      } else if (val && typeof val === 'object' && 'result' in val) {
-        processedVal = (val as any).result
-      } else if (val && typeof val === 'object' && 'richText' in val) {
-        // 富文本类型：拼接所有 run 的 text
-        processedVal = (val as any).richText.map((run: any) => run.text || '').join('')
-      } else if (val && typeof val === 'object' && 'hyperlink' in val) {
-        // 超链接类型
-        processedVal = (val as any).text || (val as any).hyperlink
-      }
-      rowData[col] = processedVal ?? ''
-      if (processedVal !== '' && processedVal !== null && processedVal !== undefined) {
-        hasData = true
-      }
-    })
-    if (hasData) {
-      rows.push(rowData)
-    }
-  }
-
-  onProgress?.(`读取 ${path.basename(filePath)}：${rows.length} 行，${validColumns.length} 列`)
-  return { columns: validColumns, rows }
-}
-
-/**
- * 清洗字段值：转字符串 + 去首尾空格
- */
-function cleanValue(val: any): string {
-  if (val === null || val === undefined) return ''
-  return String(val).trim()
-}
 
 /**
  * 构建 join 查找索引（Map）
@@ -110,7 +27,7 @@ function buildJoinIndex(
 ): Map<string, Record<string, any>[]> {
   const index = new Map<string, Record<string, any>[]>()
   for (const row of rows) {
-    const key = matchPairs.map(p => cleanValue(row[p.auxCol])).join('\x00')
+    const key = matchPairs.map(p => clean(row[p.auxCol])).join('\x00')
     if (!index.has(key)) {
       index.set(key, [])
     }
@@ -139,7 +56,7 @@ function leftJoin(
   const auxColumns = auxRows.length > 0 ? Object.keys(auxRows[0]) : []
 
   for (const orderRow of orderRows) {
-    const key = matchPairs.map(p => cleanValue(orderRow[p.orderCol])).join('\x00')
+    const key = matchPairs.map(p => clean(orderRow[p.orderCol])).join('\x00')
     const matches = auxIndex.get(key)
 
     if (matches && matches.length > 0) {
@@ -173,6 +90,163 @@ function leftJoin(
   return { rows: result, matched, unmatched }
 }
 
+/** 进度步数上下文（跨函数共享计数） */
+interface ProgressCtx {
+  current: number
+  total: number
+}
+
+/**
+ * 读取辅助表并逐一 left join 到订单行
+ * （第 1+2 步合并执行与第 2 步独立执行共用）
+ */
+async function joinAuxTables(
+  orderRows: Record<string, any>[],
+  auxFilePaths: Record<string, string>,
+  auxiliaryTables: AuxTableConfig[],
+  onProgress: (progress: ExcelMergeProgress) => void,
+  ctx: ProgressCtx
+): Promise<{ rows: Record<string, any>[]; matched: number; unmatched: number }> {
+  // 订单表侧的匹配字段只清洗一次（原先按辅助表数量重复全表遍历）
+  const orderMatchCols = new Set<string>()
+  for (const aux of auxiliaryTables) {
+    for (const pair of aux.matchPairs) {
+      if (pair.orderCol) orderMatchCols.add(pair.orderCol)
+    }
+  }
+  for (const col of orderMatchCols) {
+    for (const row of orderRows) {
+      if (col in row) row[col] = clean(row[col])
+    }
+  }
+
+  let totalMatched = 0
+  let totalUnmatched = 0
+
+  for (let i = 0; i < auxiliaryTables.length; i++) {
+    const auxConfig: AuxTableConfig = auxiliaryTables[i]
+    const auxFilePath = auxFilePaths[auxConfig.id]
+
+    if (!auxFilePath || !fs.existsSync(auxFilePath)) {
+      throw new Error(`辅助表文件不存在: ${auxConfig.fileName}`)
+    }
+
+    onProgress({
+      step: `合并辅助表 (${i + 1}/${auxiliaryTables.length})`,
+      currentTable: auxConfig.name,
+      currentTableIndex: i + 1,
+      totalTables: auxiliaryTables.length,
+      overallProgress: Math.round((ctx.current / ctx.total) * 100),
+      status: 'merging',
+      message: `正在读取辅助表: ${auxConfig.fileName}`
+    })
+
+    const { rows: auxRows } = await readTable(auxFilePath)
+    ctx.current++
+
+    // 清洗本辅助表的匹配字段
+    for (const pair of auxConfig.matchPairs) {
+      if (!pair.auxCol) continue
+      for (const row of auxRows) {
+        if (pair.auxCol in row) {
+          row[pair.auxCol] = clean(row[pair.auxCol])
+        }
+      }
+    }
+
+    onProgress({
+      step: `合并辅助表 (${i + 1}/${auxiliaryTables.length})`,
+      currentTable: auxConfig.name,
+      currentTableIndex: i + 1,
+      totalTables: auxiliaryTables.length,
+      overallProgress: Math.round((ctx.current / ctx.total) * 100),
+      status: 'merging',
+      message: `正在按 ${auxConfig.matchPairs.map(p => `${p.orderCol}↔${p.auxCol}`).join(', ')} 合并...`
+    })
+
+    const joinResult = leftJoin(
+      orderRows,
+      auxRows,
+      auxConfig.matchPairs,
+      auxConfig.name,
+      auxConfig.how
+    )
+
+    orderRows = joinResult.rows
+    totalMatched += joinResult.matched
+    totalUnmatched += joinResult.unmatched
+    ctx.current++
+  }
+
+  return { rows: orderRows, matched: totalMatched, unmatched: totalUnmatched }
+}
+
+/**
+ * 收集全部列名并写入结果 Excel（共用）
+ */
+async function writeResultFile(
+  rows: Record<string, any>[],
+  outputDir: string,
+  outputFileName: string,
+  onProgress: (progress: ExcelMergeProgress) => void,
+  ctx: ProgressCtx
+): Promise<{ outputPath: string; columns: string[] }> {
+  // 收集所有列名（保持顺序）
+  const allColumnsSet = new Set<string>()
+  for (const row of rows) {
+    for (const key of Object.keys(row)) {
+      allColumnsSet.add(key)
+    }
+  }
+  const allColumns = Array.from(allColumnsSet)
+
+  onProgress({
+    step: '写入结果文件',
+    currentTable: '输出',
+    currentTableIndex: 0,
+    totalTables: 1,
+    overallProgress: Math.round((ctx.current / ctx.total) * 100),
+    status: 'writing',
+    message: `正在写入 ${rows.length} 行数据到 Excel...`
+  })
+
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true })
+  }
+
+  const outputPath = path.join(outputDir, outputFileName)
+
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet('合并结果')
+
+  // 写表头
+  ws.columns = allColumns.map(col => ({
+    header: col,
+    key: col,
+    width: Math.max(col.length * 2 + 4, 12)
+  }))
+
+  // 写数据行
+  for (const row of rows) {
+    ws.addRow(row)
+  }
+
+  // 表头样式
+  const headerRow = ws.getRow(1)
+  headerRow.font = { bold: true }
+  headerRow.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFE8F0FE' }
+  }
+  headerRow.alignment = { horizontal: 'center', vertical: 'middle' }
+
+  await writeWorkbookSafe(wb, outputPath)
+  ctx.current++
+
+  return { outputPath, columns: allColumns }
+}
+
 /**
  * 主函数：执行 Excel 合并
  */
@@ -180,7 +254,6 @@ export async function mergeExcelData(
   params: MergeParams,
   onProgress: (progress: ExcelMergeProgress) => void
 ): Promise<ExcelMergeResult> {
-  isCancelled = false
   const { orderFilePaths, auxFilePaths, config, outputDir } = params
 
   if (orderFilePaths.length === 0) {
@@ -205,14 +278,12 @@ export async function mergeExcelData(
   let orderColumns: string[] = []
 
   for (let i = 0; i < orderFilePaths.length; i++) {
-    if (isCancelled) throw new Error('合并已取消')
-
     const filePath = orderFilePaths[i]
     if (!fs.existsSync(filePath)) {
       throw new Error(`订单文件不存在: ${filePath}`)
     }
 
-    const { columns, rows } = await readExcel(filePath)
+    const { columns, rows } = await readTable(filePath)
 
     if (i === 0) {
       orderColumns = columns
@@ -245,7 +316,7 @@ export async function mergeExcelData(
       if (orderColumns.includes(col)) {
         for (const row of orderRows) {
           if (col in row) {
-            row[col] = cleanValue(row[col])
+            row[col] = clean(row[col])
           }
         }
       }
@@ -253,125 +324,18 @@ export async function mergeExcelData(
   }
 
   // ─── 3. 读取辅助表并逐一 join ───
-  let totalMatched = 0
-  let totalUnmatched = 0
+  const ctx: ProgressCtx = { current: currentStep, total: totalSteps }
+  const joinResult = await joinAuxTables(orderRows, auxFilePaths, config.auxiliaryTables, onProgress, ctx)
+  orderRows = joinResult.rows
 
-  for (let i = 0; i < config.auxiliaryTables.length; i++) {
-    if (isCancelled) throw new Error('合并已取消')
-
-    const auxConfig = config.auxiliaryTables[i]
-    const auxFilePath = auxFilePaths[auxConfig.id]
-
-    if (!auxFilePath || !fs.existsSync(auxFilePath)) {
-      throw new Error(`辅助表文件不存在: ${auxConfig.fileName}`)
-    }
-
-    onProgress({
-      step: `合并辅助表 (${i + 1}/${config.auxiliaryTables.length})`,
-      currentTable: auxConfig.name,
-      currentTableIndex: i + 1,
-      totalTables: config.auxiliaryTables.length,
-      overallProgress: Math.round((currentStep / totalSteps) * 100),
-      status: 'merging',
-      message: `正在读取辅助表: ${auxConfig.fileName}`
-    })
-
-    const { rows: auxRows } = await readExcel(auxFilePath)
-    currentStep++
-
-    // 清洗辅助表匹配字段
-    for (const pair of auxConfig.matchPairs) {
-      for (const row of auxRows) {
-        if (pair.auxCol in row) {
-          row[pair.auxCol] = cleanValue(row[pair.auxCol])
-        }
-      }
-    }
-    // 清洗订单表匹配字段
-    for (const pair of auxConfig.matchPairs) {
-      for (const row of orderRows) {
-        if (pair.orderCol in row) {
-          row[pair.orderCol] = cleanValue(row[pair.orderCol])
-        }
-      }
-    }
-
-    onProgress({
-      step: `合并辅助表 (${i + 1}/${config.auxiliaryTables.length})`,
-      currentTable: auxConfig.name,
-      currentTableIndex: i + 1,
-      totalTables: config.auxiliaryTables.length,
-      overallProgress: Math.round((currentStep / totalSteps) * 100),
-      status: 'merging',
-      message: `正在按 ${auxConfig.matchPairs.map(p => `${p.orderCol}↔${p.auxCol}`).join(', ')} 合并...`
-    })
-
-    const joinResult = leftJoin(
-      orderRows,
-      auxRows,
-      auxConfig.matchPairs,
-      auxConfig.name,
-      auxConfig.how
-    )
-
-    orderRows = joinResult.rows
-    totalMatched += joinResult.matched
-    totalUnmatched += joinResult.unmatched
-    currentStep++
-  }
-
-  // ─── 4. 收集所有列名（保持顺序）───
-  const allColumnsSet = new Set<string>()
-  for (const row of orderRows) {
-    for (const key of Object.keys(row)) {
-      allColumnsSet.add(key)
-    }
-  }
-  const allColumns = Array.from(allColumnsSet)
-
-  // ─── 5. 写入输出文件 ───
-  onProgress({
-    step: '写入结果文件',
-    currentTable: '输出',
-    currentTableIndex: 0,
-    totalTables: 1,
-    overallProgress: Math.round((currentStep / totalSteps) * 100),
-    status: 'writing',
-    message: `正在写入 ${orderRows.length} 行数据到 Excel...`
-  })
-
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true })
-  }
-
-  const outputPath = path.join(outputDir, config.outputFileName || '合并结果.xlsx')
-
-  const wb = new ExcelJS.Workbook()
-  const ws = wb.addWorksheet('合并结果')
-
-  // 写表头
-  ws.columns = allColumns.map(col => ({
-    header: col,
-    key: col,
-    width: Math.max(col.length * 2 + 4, 12)
-  }))
-
-  // 写数据行
-  for (const row of orderRows) {
-    ws.addRow(row)
-  }
-
-  // 表头样式
-  const headerRow = ws.getRow(1)
-  headerRow.font = { bold: true }
-  headerRow.fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFE8F0FE' }
-  }
-  headerRow.alignment = { horizontal: 'center', vertical: 'middle' }
-
-  await writeWorkbookSafe(wb, outputPath)
+  // ─── 4~5. 收集列名并写入输出文件 ───
+  const { outputPath, columns: allColumns } = await writeResultFile(
+    orderRows,
+    outputDir,
+    config.outputFileName || '合并结果.xlsx',
+    onProgress,
+    ctx
+  )
 
   onProgress({
     step: '完成',
@@ -387,43 +351,100 @@ export async function mergeExcelData(
     outputPath,
     totalRows: orderRows.length,
     totalColumns: allColumns.length,
-    matchedCount: totalMatched,
-    unmatchedCount: totalUnmatched
+    matchedCount: joinResult.matched,
+    unmatchedCount: joinResult.unmatched
+  }
+}
+
+/**
+ * 第 2 步独立执行：读取「合并原表」产物，逐一 join 辅助表并写出最终结果
+ */
+export async function joinAuxExcelData(
+  params: JoinAuxParams,
+  onProgress: (progress: ExcelMergeProgress) => void
+): Promise<ExcelMergeResult> {
+  const { inputPath, auxFilePaths, config, outputDir } = params
+
+  if (!fs.existsSync(inputPath)) {
+    throw new Error(`合并原表文件不存在: ${inputPath}`)
+  }
+  if (config.auxiliaryTables.length === 0) {
+    throw new Error('没有配置辅助表')
+  }
+
+  const totalSteps = 1 + config.auxiliaryTables.length * 2 + 1
+  const ctx: ProgressCtx = { current: 0, total: totalSteps }
+
+  // ─── 1. 读取合并原表 ───
+  onProgress({
+    step: '读取合并原表',
+    currentTable: path.basename(inputPath),
+    currentTableIndex: 0,
+    totalTables: totalSteps,
+    overallProgress: 0,
+    status: 'reading',
+    message: '正在读取合并原表...'
+  })
+
+  const { rows: inputRows } = await readTable(inputPath)
+  let orderRows = inputRows
+  ctx.current++
+
+  // ─── 2. 强制文本列转换（防止中间产物读回后格式丢失）───
+  if (config.textColumns && config.textColumns.length > 0) {
+    for (const col of config.textColumns) {
+      for (const row of orderRows) {
+        if (col in row) {
+          row[col] = clean(row[col])
+        }
+      }
+    }
+  }
+
+  // ─── 3. 读取辅助表并逐一 join ───
+  const joinResult = await joinAuxTables(orderRows, auxFilePaths, config.auxiliaryTables, onProgress, ctx)
+  orderRows = joinResult.rows
+
+  // ─── 4. 收集列名并写入输出文件 ───
+  const outputFileName = params.outputFileName || config.outputFileName || '合并结果.xlsx'
+  const { outputPath, columns: allColumns } = await writeResultFile(
+    orderRows,
+    outputDir,
+    outputFileName,
+    onProgress,
+    ctx
+  )
+
+  onProgress({
+    step: '完成',
+    currentTable: '',
+    currentTableIndex: 0,
+    totalTables: 0,
+    overallProgress: 100,
+    status: 'completed',
+    message: `合并完成！共 ${orderRows.length} 行，${allColumns.length} 列`
+  })
+
+  return {
+    outputPath,
+    totalRows: orderRows.length,
+    totalColumns: allColumns.length,
+    matchedCount: joinResult.matched,
+    unmatchedCount: joinResult.unmatched
   }
 }
 
 /**
  * 读取 Excel 列名（用于前端字段选择下拉框）
  */
-export async function getExcelColumns(
-  filePath: string,
-  sheetName?: string
-): Promise<string[]> {
-  const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.readFile(filePath)
-  const sheet = sheetName
-    ? workbook.getWorksheet(sheetName)
-    : workbook.worksheets[0]
-
-  if (!sheet) {
-    throw new Error(`文件 ${path.basename(filePath)} 没有工作表`)
-  }
-
-  const headerRow = sheet.getRow(1)
-  const columns: string[] = []
-  headerRow.eachCell((cell, colNumber) => {
-    const val = String(cell.value || '').trim()
-    if (val) {
-      columns[colNumber - 1] = val
-    }
-  })
-
-  return columns.filter(c => c) // 过滤空列名
+export async function getExcelColumns(filePath: string): Promise<string[]> {
+  return readColumnsAtRow(filePath, 1)
 }
 
 /**
- * 取消合并
+ * 读取表格文件元信息：全部工作表名 + 第一张表的首行列名。
+ * 用于第 1 步合并前检测「工作表名不一致 / 各文件字段不一致」。
  */
-export function cancelMerge() {
-  isCancelled = true
+export async function getExcelFileInfo(filePath: string): Promise<WorkbookMeta> {
+  return readWorkbookMeta(filePath)
 }

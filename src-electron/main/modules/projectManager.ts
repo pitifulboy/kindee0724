@@ -124,8 +124,9 @@ async function tryWrite(filePath: string, data: string): Promise<boolean> {
 
 /**
  * 读取单个文件（带重试）
+ * 采用 await delay 真实让出事件循环（原实现是空转的忙等，会阻塞主进程）
  */
-function tryRead(filePath: string): string | null {
+async function tryRead(filePath: string): Promise<string | null> {
   const maxRetries = 3
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -133,9 +134,7 @@ function tryRead(filePath: string): string | null {
     } catch (err: any) {
       if (attempt === maxRetries) return null
       if (err.code === 'EPERM' || err.code === 'EBUSY' || err.code === 'EACCES') {
-        // 同步等待（tryRead 仅在启动时调用，短暂阻塞可接受）
-        const start = Date.now()
-        while (Date.now() - start < 200 * attempt) { /* yield to event loop */ }
+        await delay(200 * attempt)
         continue
       }
       return null
@@ -173,7 +172,7 @@ async function saveAll(data: Record<string, ProjectItem>): Promise<void> {
 /**
  * 加载：优先使用最新的文件（比较修改时间），主路径损坏时读备用路径
  */
-function loadAll(): Record<string, ProjectItem> {
+async function loadAll(): Promise<Record<string, ProjectItem>> {
   const primary = getPrimaryPath()
   const fallback = getFallbackPath()
 
@@ -196,7 +195,7 @@ function loadAll(): Record<string, ProjectItem> {
 
   // 尝试最新的文件，失败则依次尝试其他文件
   for (const { path: fp } of candidates) {
-    const raw = tryRead(fp)
+    const raw = await tryRead(fp)
     if (raw !== null) {
       try { return JSON.parse(raw) } catch { /* 损坏，尝试下一个 */ }
     }
@@ -208,82 +207,95 @@ function loadAll(): Record<string, ProjectItem> {
 // ═══════════════════════════════════════════════════════════════
 // 内存缓存 — 首次读取后所有读写操作均在缓存中进行
 // 写操作同步刷盘，读操作零磁盘 I/O，彻底规避安全软件锁文件问题
+// 约定：**先落盘成功、再更新缓存**，保证内存与磁盘一致
 // ═══════════════════════════════════════════════════════════════
 
 let projectsCache: Record<string, ProjectItem> | null = null
+let loadPromise: Promise<Record<string, ProjectItem>> | null = null
 
 /** 从缓存获取全部项目数据（首次调用时从磁盘加载） */
-function getProjects(): Record<string, ProjectItem> {
-  if (projectsCache === null) {
-    projectsCache = loadAll()
+async function getProjects(): Promise<Record<string, ProjectItem>> {
+  if (projectsCache !== null) return projectsCache
+  if (!loadPromise) {
+    loadPromise = loadAll().then(data => {
+      projectsCache = data
+      return data
+    })
   }
-  return projectsCache
+  return loadPromise
 }
 
-/** 保存到磁盘并更新缓存 */
-async function saveProjects(data: Record<string, ProjectItem>): Promise<void> {
-  await saveAll(data)
-  projectsCache = data
+/** 先在副本上变更、落盘成功后再替换缓存 */
+async function commit(
+  mutate: (draft: Record<string, ProjectItem>) => void
+): Promise<boolean> {
+  const current = await getProjects()
+  const draft: Record<string, ProjectItem> = { ...current }
+  mutate(draft)
+  await saveAll(draft)
+  projectsCache = draft
+  return true
 }
 
 // ═══════════════════════════════════════════════════════════════
 // 公开 API（全部通过缓存操作）
 // ═══════════════════════════════════════════════════════════════
 
-export function listProjects(): ProjectListItem[] {
-  const data = getProjects()
+export async function listProjects(): Promise<ProjectListItem[]> {
+  const data = await getProjects()
   return Object.values(data)
     .map(p => ({ id: p.id, name: p.name, updatedAt: p.updatedAt }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 
-export function getProject(id: string): ProjectItem | null {
-  const data = getProjects()
+export async function getProject(id: string): Promise<ProjectItem | null> {
+  const data = await getProjects()
   return data[id] || null
 }
 
 export async function saveProject(project: ProjectItem): Promise<void> {
-  const data = getProjects()
-  data[project.id] = {
-    ...project,
-    updatedAt: new Date().toISOString()
-  }
-  await saveProjects(data)
+  const now = new Date().toISOString()
+  await commit(draft => {
+    draft[project.id] = { ...project, updatedAt: now }
+  })
 }
 
 export async function deleteProject(id: string): Promise<boolean> {
-  const data = getProjects()
-  if (!data[id]) return false
-  delete data[id]
-  await saveProjects(data)
-  return true
+  const current = await getProjects()
+  if (!current[id]) return false
+  return commit(draft => {
+    delete draft[id]
+  })
 }
 
 export async function renameProject(id: string, newName: string): Promise<boolean> {
-  const data = getProjects()
-  if (!data[id]) return false
-  data[id].name = newName
-  data[id].updatedAt = new Date().toISOString()
-  await saveProjects(data)
-  return true
+  const current = await getProjects()
+  const existing = current[id]
+  if (!existing) return false
+  const now = new Date().toISOString()
+  return commit(draft => {
+    draft[id] = { ...existing, name: newName, updatedAt: now }
+  })
 }
 
 export async function updateStep1Preset(id: string, preset: Step1Preset): Promise<boolean> {
-  const data = getProjects()
-  if (!data[id]) return false
-  data[id].step1Preset = preset
-  data[id].updatedAt = new Date().toISOString()
-  await saveProjects(data)
-  return true
+  const current = await getProjects()
+  const existing = current[id]
+  if (!existing) return false
+  const now = new Date().toISOString()
+  return commit(draft => {
+    draft[id] = { ...existing, step1Preset: preset, updatedAt: now }
+  })
 }
 
 export async function updateStep2Preset(id: string, preset: Step2Preset): Promise<boolean> {
-  const data = getProjects()
-  if (!data[id]) return false
-  data[id].step2Preset = preset
-  data[id].updatedAt = new Date().toISOString()
-  await saveProjects(data)
-  return true
+  const current = await getProjects()
+  const existing = current[id]
+  if (!existing) return false
+  const now = new Date().toISOString()
+  return commit(draft => {
+    draft[id] = { ...existing, step2Preset: preset, updatedAt: now }
+  })
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -291,35 +303,37 @@ export async function updateStep2Preset(id: string, preset: Step2Preset): Promis
 // ═══════════════════════════════════════════════════════════════
 
 /** 导出全部项目为可移植 JSON 对象 */
-export function exportProjects(): Record<string, ProjectItem> {
-  return { ...getProjects() }
+export async function exportProjects(): Promise<Record<string, ProjectItem>> {
+  return { ...(await getProjects()) }
 }
 
 /** 导入项目（新增模式：不覆盖，同名项目自动加序号） */
 export async function importProjects(projects: Record<string, ProjectItem>): Promise<number> {
-  const data = getProjects()
-  const existingNames = new Set(Object.values(data).map(p => p.name))
+  const current = await getProjects()
+  const existingNames = new Set(Object.values(current).map(p => p.name))
+  const now = new Date().toISOString()
   let count = 0
 
-  for (const project of Object.values(projects)) {
-    let finalName = project.name
-    if (existingNames.has(finalName)) {
-      let suffix = 1
-      while (existingNames.has(`${project.name}_${suffix}`)) suffix++
-      finalName = `${project.name}_${suffix}`
-    }
-    existingNames.add(finalName)
+  await commit(draft => {
+    for (const project of Object.values(projects)) {
+      let finalName = project.name
+      if (existingNames.has(finalName)) {
+        let suffix = 1
+        while (existingNames.has(`${project.name}_${suffix}`)) suffix++
+        finalName = `${project.name}_${suffix}`
+      }
+      existingNames.add(finalName)
 
-    const newId = `import_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
-    data[newId] = {
-      ...project,
-      id: newId,
-      name: finalName,
-      updatedAt: new Date().toISOString()
+      const newId = `import_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+      draft[newId] = {
+        ...project,
+        id: newId,
+        name: finalName,
+        updatedAt: now
+      }
+      count++
     }
-    count++
-  }
+  })
 
-  await saveProjects(data)
   return count
 }

@@ -8,13 +8,27 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* 配色方案 CSS 变量（默认值 = 原版配色；个人设置弹框会动态覆盖） */
+  --ui-page-bg: #f8fafc;
+  --ui-model-bg: #f0fdf4;
+  --ui-primary: #1e40af;        /* 主按钮底色（primary-800） */
+  --ui-primary-hover: #1d4ed8;  /* 按钮悬浮 / 强调文字（primary-700） */
+  --ui-primary-600: #2563eb;
+  --ui-primary-500: #3b82f6;
+  --ui-primary-400: #60a5fa;
+  --ui-primary-300: #93c5fd;
+  --ui-primary-border: #bfdbfe; /* 强调边框（primary-200） */
+  --ui-primary-soft: #eff6ff;   /* 强调浅底（primary-50/100） */
+  --ui-primary-900: #1e3a8a;
 }
 
 body {
   margin: 0;
   padding: 0;
-  background-color: #f8fafc;
-  color: #1e293b;
+  background-color: var(--ui-page-bg, #f8fafc);
+  /* 硬约束：正文文字一律黑色（原 #1e293b 深蓝灰） */
+  color: #000000;
   min-height: 100vh;
 }
 
@@ -42,36 +56,47 @@ body {
   background: #94a3b8;
 }
 
-/* 按钮样式 */
-.btn-primary {
-  @apply px-4 py-2 bg-primary-800 text-white rounded-lg hover:bg-primary-700 transition-colors duration-200 disabled:cursor-not-allowed;
-}
+@layer components {
+  /* 统一焦点可见性：键盘用户始终能看到焦点（鼠标点击不触发） */
+  .focus-ring {
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1;
+  }
 
-.btn-secondary {
-  @apply px-4 py-2 bg-primary-800 text-white rounded-lg hover:bg-primary-700 transition-colors duration-200 disabled:cursor-not-allowed;
-}
+  /* 按钮样式：hover 微放大 / 按下微收缩，仅动画 transform（GPU 加速） */
+  .btn-primary {
+    @apply px-4 py-2 bg-primary-800 text-white rounded-lg hover:bg-primary-700 transition-all duration-200 disabled:cursor-not-allowed;
+  }
 
-.btn-danger {
-  @apply px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors duration-200 disabled:cursor-not-allowed;
-}
+  .btn-secondary {
+    @apply px-4 py-2 bg-primary-800 text-white rounded-lg hover:bg-primary-700 transition-all duration-200 disabled:cursor-not-allowed;
+  }
 
-/* 输入框样式 */
-.input-field {
-  @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200;
-}
+  .btn-danger {
+    @apply px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-all duration-200 disabled:cursor-not-allowed;
+  }
 
-/* 卡片样式 */
-.card {
-  @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6;
-}
+  .btn-press {
+    @apply transition-transform duration-200 ease-out hover:scale-[1.02] active:scale-[0.98] disabled:hover:scale-100 disabled:active:scale-100;
+  }
 
-/* 拖拽区域样式 */
-.drop-zone {
-  @apply border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer transition-all duration-200 hover:border-primary-400 hover:bg-primary-800;
-}
+  /* 输入框样式 */
+  .input-field {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200;
+  }
 
-.drop-zone.active {
-  @apply border-primary-500 bg-primary-800;
+  /* 卡片样式 */
+  .card {
+    @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6;
+  }
+
+  /* 拖拽区域样式：悬停用浅色高亮（保持黑字可读，原深蓝底黑字对比度不足） */
+  .drop-zone {
+    @apply border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer transition-all duration-200 hover:border-primary-400 hover:bg-primary-50;
+  }
+
+  .drop-zone.active {
+    @apply border-primary-500 bg-primary-50;
+  }
 }
 
 /* Toast 滑入动画 */
@@ -88,4 +113,15 @@ body {
 
 .animate-slide-in {
   animation: slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 尊重「减少动态效果」系统偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

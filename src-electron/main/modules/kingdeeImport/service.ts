@@ -1,232 +1,42 @@
+/**
+ * 金蝶导入核心服务（六步流水线）
+ *
+ * 步骤：step1 订单拆分 → step2a Join → step2b 删未匹配 → step2c 填充 → step2d 恢复结构 → step3 汇总
+ * 通用 Excel 读表 / 取值 / 清洗 / 写盘逻辑见 ../../shared/excel。
+ */
 import * as fs from 'fs'
 import * as path from 'path'
 import ExcelJS from 'exceljs'
-import type {
-  // KingdeeImportPreset,  // 旧预设类型，仅旧 generateImportFile 使用（已废弃）
-  // KingdeeImportProgress,  // 旧进度类型（已废弃）
-  // KingdeeImportResult,    // 旧结果类型（已废弃）
-  FieldMapping,
-  SeqConfig
-} from './types'
+import {
+  clean,
+  strictKey,
+  readTable,
+  readColumnsAtRow,
+  readTemplate,
+  readHeaderRow,
+  readRowValues,
+  resolveWritableDir,
+  writeWorkbookSafe,
+} from '../../shared/excel'
+import { applyTransforms } from './transform'
+import type { TransformRule } from './transform'
+import type { FieldMapping, SeqConfig } from './types'
 
-// isCancelled / cancelGenerate 仅旧 generateImportFile 使用，已废弃
-// let isCancelled = false
-
-/**
- * 写入 Excel 工作簿到目标路径
- *
- * exceljs 在写入 .xlsx 时会在**同目录**创建临时文件，
- * 部分安全软件（如 360）会对桌面等目录的文件创建操作做深度检查，
- * 导致 EPERM 错误。
- *
- * 解决方案：写入 temp 目录 → 拷贝到目标目录，两步分离。
- */
-async function writeWorkbookSafe(wb: ExcelJS.Workbook, targetPath: string): Promise<void> {
-  const tmpDir = path.join(require('electron').app.getPath('temp'), 'kingdee-write-cache')
-  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
-
-  const tmpPath = path.join(tmpDir, `__tmp_${Date.now()}_${Math.random().toString(36).slice(2)}.xlsx`)
-  try {
-    await wb.xlsx.writeFile(tmpPath)
-    fs.copyFileSync(tmpPath, targetPath)
-  } finally {
-    try { fs.unlinkSync(tmpPath) } catch { /* ignore */ }
-  }
-}
-
-function clean(val: any): string {
-  if (val === null || val === undefined) return ''
-  if (typeof val === 'number') {
-    return val === Math.floor(val) ? String(Math.floor(val)) : String(val)
-  }
-  return String(val).trim()
-}
-
-/** 严格匹配用的key转换：仅处理null/undefined和数字，不做trim等模糊处理 */
-function strictKey(val: any): string {
-  if (val === null || val === undefined) return ''
-  if (typeof val === 'number') {
-    return val === Math.floor(val) ? String(Math.floor(val)) : String(val)
-  }
-  return String(val)
-}
-
-async function resolveWritableDir(baseDir: string, subDirName: string): Promise<{ dir: string; fallbackUsed: boolean }> {
-  const candidates: string[] = [baseDir]
-  try {
-    const { app } = require('electron')
-    candidates.push(app.getPath('documents'))
-    candidates.push(app.getPath('desktop'))
-    candidates.push(app.getPath('temp'))
-  } catch {}
-
-  const seen = new Set<string>()
-  const uniqueCandidates = candidates.filter(c => {
-    if (seen.has(c)) return false
-    seen.add(c)
-    return true
-  })
-
-  for (const candidate of uniqueCandidates) {
-    const dir = path.join(candidate, subDirName)
-    try {
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true })
-      }
-      const testFile = path.join(dir, `.write-test-${Date.now()}`)
-      fs.writeFileSync(testFile, 'test')
-      fs.unlinkSync(testFile)
-      return { dir, fallbackUsed: candidate !== baseDir }
-    } catch {
-      continue
-    }
-  }
-
-  throw new Error(
-    `无法创建目录 "${subDirName}"：所有目标路径均无写入权限。\n` +
-    `请更换输出目录，或检查是否有权限写入「文档」「桌面」等系统目录。`
-  )
-}
-
-function getCellValue(cell: any): any {
-  const val = cell.value
-  if (val && typeof val === 'object') {
-    if ('text' in val) return (val as any).text
-    if ('result' in val) return (val as any).result
-    if ('richText' in val) return (val as any).richText.map((r: any) => r.text || '').join('')
-    if ('hyperlink' in val) return (val as any).text || (val as any).hyperlink
-  }
-  return val
-}
-
-async function readTable1(
-  filePath: string,
-  onProgress?: (msg: string) => void
-): Promise<{ columns: string[]; rows: Record<string, any>[] }> {
-  const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.readFile(filePath)
-  const sheet = workbook.worksheets[0]
-  if (!sheet) throw new Error(`文件 ${path.basename(filePath)} 没有工作表`)
-
-  const headerRow = sheet.getRow(1)
-  const columns: string[] = []
-  headerRow.eachCell((cell, colNumber) => {
-    columns[colNumber - 1] = String(cell.value || '').trim()
-  })
-  const lastNonEmpty = columns.reduce((last, val, i) => val ? i : last, -1)
-  const validColumns = columns.slice(0, lastNonEmpty + 1)
-
-  const rows: Record<string, any>[] = []
-  for (let r = 2; r <= sheet.rowCount; r++) {
-    const row = sheet.getRow(r)
-    const rowData: Record<string, any> = {}
-    let hasData = false
-    validColumns.forEach((col, i) => {
-      const cell = row.getCell(i + 1)
-      const val = getCellValue(cell)
-      rowData[col] = val ?? ''
-      if (val !== '' && val !== null && val !== undefined) hasData = true
-    })
-    if (hasData) rows.push(rowData)
-  }
-
-  onProgress?.(`读取数据表：${rows.length} 行，${validColumns.length} 列`)
-  return { columns: validColumns, rows }
-}
-
-async function readTemplate(
-  filePath: string,
-  headerRowIndex: number,
-  dataStartRowIndex: number,
-  onProgress?: (msg: string) => void
-): Promise<{
-  colMap: Record<string, number>
-  resolveCol: (templateCol: string) => number | undefined
-  allRows: any[][]
-  sampleRow: any[]
-  headerRows: any[][]
-  templateDataRows: any[][]
-  columns: string[]
-}> {
-  const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.readFile(filePath)
-  const sheet = workbook.worksheets[0]
-  if (!sheet) throw new Error(`文件 ${path.basename(filePath)} 没有工作表`)
-
-  const allRows: any[][] = []
-  for (let r = 1; r <= sheet.rowCount; r++) {
-    const row = sheet.getRow(r)
-    const rowData: any[] = []
-    row.eachCell((cell, colNumber) => {
-      rowData[colNumber - 1] = getCellValue(cell)
-    })
-    allRows.push(rowData)
-  }
-
-  const colMap: Record<string, number> = {}
-  const normalizedColMap: Record<string, number> = {}
-  const columns: string[] = []
-  if (allRows[headerRowIndex - 1]) {
-    allRows[headerRowIndex - 1].forEach((name, i) => {
-      if (name !== null && name !== undefined && String(name).trim()) {
-        const rawName = String(name).trim()
-        colMap[rawName] = i
-        columns.push(rawName)
-        const normalized = rawName.replace(/\s+/g, '').toLowerCase()
-        normalizedColMap[normalized] = i
-      }
-    })
-  }
-
-  function resolveCol(templateCol: string): number | undefined {
-    if (colMap[templateCol] !== undefined) return colMap[templateCol]
-    const normalized = templateCol.replace(/\s+/g, '').toLowerCase()
-    return normalizedColMap[normalized]
-  }
-
-  const sampleRow = allRows[dataStartRowIndex - 1]
-    ? [...allRows[dataStartRowIndex - 1]]
-    : []
-
-  const headerRows = allRows.slice(0, dataStartRowIndex - 1)
-  const templateDataRows = allRows.slice(dataStartRowIndex - 1)
-
-  onProgress?.(`读取模板：识别 ${Object.keys(colMap).length} 个列名`)
-  return { colMap, resolveCol, allRows, sampleRow, headerRows, templateDataRows, columns }
-}
+// ═══════════════════════════════════════════════════════════════
+// 列名读取（前端字段下拉）
+// ═══════════════════════════════════════════════════════════════
 
 export async function getTable1Columns(filePath: string): Promise<string[]> {
-  const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.readFile(filePath)
-  const sheet = workbook.worksheets[0]
-  if (!sheet) throw new Error(`文件没有工作表`)
-
-  const headerRow = sheet.getRow(1)
-  const columns: string[] = []
-  headerRow.eachCell((cell, colNumber) => {
-    const val = String(cell.value || '').trim()
-    if (val) columns[colNumber - 1] = val
-  })
-  return columns.filter(c => c)
+  return readColumnsAtRow(filePath, 1)
 }
 
-export async function getTemplateColumns(
-  filePath: string,
-  headerRowIndex: number
-): Promise<string[]> {
-  const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.readFile(filePath)
-  const sheet = workbook.worksheets[0]
-  if (!sheet) throw new Error(`文件没有工作表`)
-
-  const headerRow = sheet.getRow(headerRowIndex)
-  const columns: string[] = []
-  headerRow.eachCell((cell, colNumber) => {
-    const val = String(cell.value || '').trim()
-    if (val) columns[colNumber - 1] = val
-  })
-  return columns.filter(c => c)
+export async function getTemplateColumns(filePath: string, headerRowIndex: number): Promise<string[]> {
+  return readColumnsAtRow(filePath, headerRowIndex)
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Step 1：按拆分依据分组，逐组输出订单文件
+// ═══════════════════════════════════════════════════════════════
 
 interface Step1Output {
   outputPath: string
@@ -244,7 +54,7 @@ export async function step1SplitOrders(
   billNoBaseField: string,
   outputDir: string
 ): Promise<Step1Output> {
-  const { columns: table1Cols, rows: table1Rows } = await readTable1(table1Path)
+  const { columns: table1Cols, rows: table1Rows } = await readTable(table1Path)
 
   const groups = new Map<string, Record<string, any>[]>()
   for (const row of table1Rows) {
@@ -279,7 +89,10 @@ export async function step1SplitOrders(
     for (const item of items) {
       ws.addRow(table1Cols.map(col => item[col] ?? ''))
     }
-    ws.addRow(['', '', '', `单号: ${billNo}`])
+    // 单号标记行：与表头列数对齐（列数 < 4 时落在最后一列），避免表头列数变化时错列
+    const marker = table1Cols.map(() => '')
+    if (marker.length > 0) marker[Math.min(3, marker.length - 1)] = `单号: ${billNo}`
+    ws.addRow(marker)
 
     await writeWorkbookSafe(wb, orderFile)
     orderFiles.push({ orderKey, billNo, filePath: orderFile, rowCount: items.length })
@@ -300,14 +113,9 @@ export async function step1SplitOrders(
   return { outputPath: summaryFile, orderFiles, totalOrders: groups.size, table1Columns: table1Cols, fallbackWarning: fallbackWarning1 }
 }
 
-interface MatchedItem {
-  orderKey: string
-  billNo: number
-  table1Item: Record<string, any>
-  templateMatch: Record<string, any> | null
-  matchStatus: string
-  matchValue: string
-}
+// ═══════════════════════════════════════════════════════════════
+// Step 2a：模板表 LEFT JOIN 拆分明细表
+// ═══════════════════════════════════════════════════════════════
 
 interface Step2aOutput {
   outputPath: string
@@ -330,7 +138,7 @@ export async function step2aJoin(
   templateDataStartRowIndex: number,
   outputDir: string
 ): Promise<Step2aOutput> {
-  const { rows: table1Rows } = await readTable1(table1Path)
+  const { rows: table1Rows } = await readTable(table1Path)
   const { colMap, allRows, columns: table2Cols } = await readTemplate(
     table2Path, templateHeaderRowIndex, templateDataStartRowIndex
   )
@@ -360,7 +168,10 @@ export async function step2aJoin(
 
   // Build per-group data lookup map: matchFieldTable1 value -> data items[]
   const groupDataMap = new Map<string, Map<string, Record<string, any>[]>>()
+  // 记录每组首行（排序用），避免排序比较器内 Array.find 造成的 O(n²)
+  const groupFirstRow = new Map<string, Record<string, any>>()
   for (const [orderKey, items] of groups) {
+    groupFirstRow.set(orderKey, items[0] ?? {})
     const dataMap = new Map<string, Record<string, any>[]>()
     for (const item of items) {
       const key = strictKey(item[matchFieldTable1])
@@ -370,15 +181,12 @@ export async function step2aJoin(
     groupDataMap.set(orderKey, dataMap)
   }
 
-  // 按 billNoBaseField 排序分组
+  // 按 billNoBaseField 排序分组（O(n log n)）
   const sortedGroupEntries = [...groupDataMap.entries()]
   if (billNoBaseField) {
-    const dataItems = [...groups.entries()]
     sortedGroupEntries.sort((a, b) => {
-      const ga = dataItems.find(e => e[0] === a[0])
-      const gb = dataItems.find(e => e[0] === b[0])
-      const va = clean(ga?.[1]?.[0]?.[billNoBaseField] ?? '')
-      const vb = clean(gb?.[1]?.[0]?.[billNoBaseField] ?? '')
+      const va = clean(groupFirstRow.get(a[0])?.[billNoBaseField] ?? '')
+      const vb = clean(groupFirstRow.get(b[0])?.[billNoBaseField] ?? '')
       return va.localeCompare(vb)
     })
   }
@@ -454,6 +262,10 @@ export async function step2aJoin(
   return { outputPath, totalRows: rows.length, matchedCount, unmatchedCount, fallbackWarning: fallbackUsed ? `步骤2a输出目录不可写入，已回退至: ${stepDir}` : undefined }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// Step 2b：删除未匹配行
+// ═══════════════════════════════════════════════════════════════
+
 interface Step2bOutput {
   outputPath: string
   totalRows: number
@@ -475,11 +287,7 @@ export async function step2bDeleteUnmatched(
   await wb.xlsx.readFile(inputFile)
   const ws = wb.worksheets[0]
 
-  const headers: string[] = []
-  ws.getRow(1).eachCell((cell, colNum) => {
-    headers[colNum - 1] = getCellValue(cell)
-  })
-
+  const headers = readHeaderRow(ws)
   const matchStatusIdx = headers.indexOf('_matchStatus')
   if (matchStatusIdx === -1) throw new Error('未找到_matchStatus列，请确认输入文件为步骤2a的输出')
 
@@ -488,10 +296,7 @@ export async function step2bDeleteUnmatched(
   let unmatchedDeleted = 0
 
   for (let r = 2; r <= ws.rowCount; r++) {
-    const row: any[] = []
-    ws.getRow(r).eachCell((cell, colNum) => {
-      row[colNum - 1] = getCellValue(cell)
-    })
+    const row = readRowValues(ws, r)
     if (row[matchStatusIdx] === '匹配成功') {
       keptRows.push(row)
       matchedRows++
@@ -512,6 +317,10 @@ export async function step2bDeleteUnmatched(
 
   return { outputPath, totalRows: keptRows.length, matchedRows, unmatchedDeleted, fallbackWarning: fallbackUsed ? `步骤2b输出目录不可写入，已回退至: ${stepDir}` : undefined }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Step 2c：按字段映射 + 自定义填充规则填充数据
+// ═══════════════════════════════════════════════════════════════
 
 interface Step2cOutput {
   outputPath: string
@@ -547,12 +356,12 @@ export async function step2cFillData(
     }
   }
 
-  const { colMap, resolveCol, columns: table2Cols } = await readTemplate(
+  // 模板只读一次：既取列映射，也取全部行（原先重复读盘两遍）
+  const { colMap, resolveCol, columns: table2Cols, allRows: templateAllRows } = await readTemplate(
     table2Path, templateHeaderRowIndex, templateDataStartRowIndex
   )
 
   const templateDataStart = templateDataStartRowIndex - 1
-  const { allRows: templateAllRows } = await readTemplate(table2Path, templateHeaderRowIndex, templateDataStartRowIndex)
   const templateRows: Record<string, any>[] = []
   for (let i = templateDataStart; i < templateAllRows.length; i++) {
     const row = templateAllRows[i]
@@ -573,10 +382,7 @@ export async function step2cFillData(
   await wb.xlsx.readFile(inputFile)
   const ws = wb.worksheets[0]
 
-  const headers: string[] = []
-  ws.getRow(1).eachCell((cell, colNum) => {
-    headers[colNum - 1] = getCellValue(cell)
-  })
+  const headers = readHeaderRow(ws)
 
   const dataColCount = table2Cols.length
   let rowCount = 0
@@ -593,11 +399,7 @@ export async function step2cFillData(
   // 预读取所有行
   const allRows: { rowNum: number; data: any[] }[] = []
   for (let r = 2; r <= ws.rowCount; r++) {
-    const rowData: any[] = []
-    ws.getRow(r).eachCell((cell, colNum) => {
-      rowData[colNum - 1] = getCellValue(cell)
-    })
-    allRows.push({ rowNum: r, data: rowData })
+    allRows.push({ rowNum: r, data: readRowValues(ws, r) })
   }
 
   // 按所有 fieldBased 的 baseField 排序（确保同组行相邻）
@@ -617,8 +419,6 @@ export async function step2cFillData(
   const seqCounters = new Map<string, { value: number; prevBaseVal: string }>()
 
   for (const { rowNum: r, data: rowData } of allRows) {
-    const billNo = rowData[headers.indexOf('_billNo')] ?? 0
-
     for (const mapping of fieldMappings) {
       const colIdx = resolveCol(mapping.templateCol)
       if (colIdx === undefined) continue
@@ -639,7 +439,7 @@ export async function step2cFillData(
             value = seqCounters.get(seqCfg.id)!.value
             seqCounters.get(seqCfg.id)!.value += seqCfg.step
             break
-          case 'fieldBased':
+          case 'fieldBased': {
             if (!seqCounters.has(seqCfg.id)) {
               seqCounters.set(seqCfg.id, { value: seqCfg.start, prevBaseVal: '' })
             }
@@ -658,6 +458,7 @@ export async function step2cFillData(
             value = counter.value
             // 不递增：同组内（字段重复）序号也重复
             break
+          }
         }
       } else {
         // 后备：非序列类型的标准取值（date、table1、constant 仍活跃使用）
@@ -666,25 +467,27 @@ export async function step2cFillData(
             value = date
             break
           case 'table1':
-            value = rowData[dataColCount + (headers.indexOf(mapping.table1Col || '') - dataColCount)] ?? ''
+            value = rowData[headers.indexOf(mapping.table1Col || '')] ?? ''
             break
           case 'constant':
             value = mapping.constantValue || ''
             break
           // ⚠ materialCode / materialName 仅用于读取极旧的预设文件（已废弃的映射来源类型）
           // 正常情况下新创建的映射不会用到此分支，保留仅确保旧预设兼容
-          case 'materialCode':
+          case 'materialCode': {
             const dataIdx = headers.indexOf(mapping.table1Col || '')
             if (dataIdx >= dataColCount) {
               value = rowData[dataIdx] ?? ''
             }
             break
-          case 'materialName':
+          }
+          case 'materialName': {
             const codeIdx = headers.indexOf(mapping.table1Col || '')
             const matCode = codeIdx >= 0 ? clean(rowData[codeIdx]) : ''
             const tmplRow = templateMap.get(matCode)
             value = tmplRow?.[matchFieldTable2.replace('编码', '名称')] ?? ''
             break
+          }
         }
       }
 
@@ -708,6 +511,10 @@ export async function step2cFillData(
   return { outputPath, totalRows: rowCount, fallbackWarning: fallbackUsed ? `步骤2c输出目录不可写入，已回退至: ${stepDir}` : undefined }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// Step 2d：按订单分组恢复模板结构，输出填充模板文件
+// ═══════════════════════════════════════════════════════════════
+
 interface Step2dOutput {
   outputDir: string
   filledTemplateFiles: { orderKey: string; billNo: number; filePath: string; rowCount: number }[]
@@ -727,33 +534,22 @@ export async function step2dRestoreStructure(
     throw new Error(`未找到步骤2c的输出文件: ${inputFile}，请先执行步骤2c`)
   }
 
-  const { colMap, columns: table2Cols, headerRows } = await readTemplate(
+  // 一次读盘同时拿到：sheet 名 / 表头行 / 模板列
+  const { columns: table2Cols, headerRows, sheetName } = await readTemplate(
     table2Path, templateHeaderRowIndex, templateDataStartRowIndex
   )
-
-  // Read template to preserve sheet name
-  const tmpWb = new ExcelJS.Workbook()
-  await tmpWb.xlsx.readFile(table2Path)
-  const sheetName = tmpWb.worksheets[0]?.name || 'Sheet1'
 
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.readFile(inputFile)
   const ws = wb.worksheets[0]
 
-  const headers: string[] = []
-  ws.getRow(1).eachCell((cell, colNum) => {
-    headers[colNum - 1] = getCellValue(cell)
-  })
-
+  const headers = readHeaderRow(ws)
   const orderKeyIdx = headers.indexOf('_orderKey')
   const billNoIdx = headers.indexOf('_billNo')
 
   const groups = new Map<string, { billNo: number; rows: any[][] }>()
   for (let r = 2; r <= ws.rowCount; r++) {
-    const rowData: any[] = []
-    ws.getRow(r).eachCell((cell, colNum) => {
-      rowData[colNum - 1] = getCellValue(cell)
-    })
+    const rowData = readRowValues(ws, r)
     const orderKey = rowData[orderKeyIdx] ?? ''
     const billNo = rowData[billNoIdx] ?? 0
     const templateRow: any[] = []
@@ -789,11 +585,17 @@ export async function step2dRestoreStructure(
   return { outputDir: stepDir, filledTemplateFiles, totalRows, fallbackWarning: fallbackUsed ? `步骤2d输出目录不可写入，已回退至: ${stepDir}` : undefined }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// Step 3：汇总各模板为金蝶导入总表
+// ═══════════════════════════════════════════════════════════════
+
 interface Step3Output {
   outputPath: string
   totalOrders: number
   totalRows: number
   fallbackWarning?: string
+  /** 数据转换的部分失败提示（失败单元格保留原值 / 列不存在跳过） */
+  transformWarning?: string
 }
 
 export async function step3MergeTemplates(
@@ -803,16 +605,13 @@ export async function step3MergeTemplates(
   templateDataStartRowIndex: number,
   outputDir: string,
   outputPrefix: string,
-  textFormatColumns: string[]
+  textFormatColumns: string[],
+  transforms: TransformRule[] = []
 ): Promise<Step3Output> {
-  const { headerRows, colMap } = await readTemplate(
+  // 一次读盘同时拿到：表头行 / 列映射 / 模板 sheet 名
+  const { headerRows, colMap, sheetName: templateSheetName } = await readTemplate(
     table2Path, templateHeaderRowIndex, templateDataStartRowIndex
   )
-
-  // Read original template to get sheet name
-  const tmpWb = new ExcelJS.Workbook()
-  await tmpWb.xlsx.readFile(table2Path)
-  const templateSheetName = tmpWb.worksheets[0]?.name || 'Sheet1'
 
   // Create output workbook with same sheet name
   const wbOut = new ExcelJS.Workbook()
@@ -833,12 +632,7 @@ export async function step3MergeTemplates(
 
     // Skip header rows, only read data rows
     for (let r = headerCount + 1; r <= ws.rowCount; r++) {
-      const row = ws.getRow(r)
-      const rowData: any[] = []
-      row.eachCell((cell, colNumber) => {
-        rowData[colNumber - 1] = getCellValue(cell)
-      })
-      wsOut.addRow(rowData)
+      wsOut.addRow(readRowValues(ws, r))
       totalOut++
     }
   }
@@ -866,6 +660,16 @@ export async function step3MergeTemplates(
     }
   }
 
+  // ── 数据转换（可选规则，仅数据行；表头不动；未配置时完全跳过）──
+  let transformWarning: string | undefined
+  if (transforms && transforms.length > 0) {
+    const tr = applyTransforms(wsOut, colMap, headerCount, transforms)
+    const parts: string[] = []
+    if (tr.failed > 0) parts.push(`${tr.failed} 个单元格转换失败，已保留原值`)
+    if (tr.skippedColumns.length > 0) parts.push(`以下列在汇总表中不存在，对应规则已跳过：${[...new Set(tr.skippedColumns)].join('、')}`)
+    if (parts.length > 0) transformWarning = parts.join('；')
+  }
+
   const timeTag = new Date().toISOString().replace(/[:.]/g, '').replace('T', '_').slice(0, 15)
   const fileName = `${outputPrefix}_${timeTag}.xlsx`
   // 直接写入输出目录，不创建子文件夹
@@ -880,33 +684,7 @@ export async function step3MergeTemplates(
     outputPath: finalOutputPath,
     totalOrders: filledTemplateFiles.length,
     totalRows: totalOut,
-    fallbackWarning: fallbackWarning3
+    fallbackWarning: fallbackWarning3,
+    transformWarning
   }
 }
-
-// ═══════════════════════════════════════════════════════════════
-// [已废弃] generateImportFile / cancelGenerate
-// 旧的一键生成入口，已被 step1~step3 逐步执行取代。
-// 保留注释代码作为参考，不再编译使用。
-// ═══════════════════════════════════════════════════════════════
-// export async function generateImportFile(
-//   config: KingdeeImportPreset,
-//   onProgress: (progress: KingdeeImportProgress) => void
-// ): Promise<KingdeeImportResult> {
-//   isCancelled = false
-//
-//   if (!fs.existsSync(config.table1Path)) { ... }
-//   ...
-// 完整代码参见 git 历史或旧版本
-//
-//   return {
-//     outputPath: finalOutputPath,
-//     totalOrders,
-//     totalRows: totalOut,
-//     skippedRows: 0
-//   }
-// }
-//
-// export function cancelGenerate() {
-//   isCancelled = true
-// }

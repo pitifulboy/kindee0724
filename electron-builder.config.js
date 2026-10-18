@@ -8,62 +8,15 @@ module.exports = {
     output: 'release',
     buildResources: 'build'
   },
+  // 只需声明「打包产物」与「入口」；依赖处理交给 electron-builder：
+  // - package.json 会自动进入 asar
+  // - node_modules 由 electron-builder 依据 package.json 的生产依赖树自动裁剪复制
+  //   （devDependencies 永不打入），因此无需手工枚举 exceljs 的 50 余个传递依赖。
   files: [
     'dist/**/*',
     'dist-electron/**/*',
-    // ─── exceljs 及其运行时依赖 ───
-    'node_modules/exceljs/**/*',
-    'node_modules/archiver/**/*',
-    'node_modules/archiver-utils/**/*',
-    'node_modules/compress-commons/**/*',
-    'node_modules/zip-stream/**/*',
-    'node_modules/glob/**/*',
-    'node_modules/dayjs/**/*',
-    'node_modules/fast-csv/**/*',
-    'node_modules/@fast-csv/**/*',
-    'node_modules/jszip/**/*',
-    'node_modules/lie/**/*',
-    'node_modules/setimmediate/**/*',
-    'node_modules/readable-stream/**/*',
-    'node_modules/string_decoder/**/*',
-    'node_modules/safe-buffer/**/*',
-    'node_modules/util-deprecate/**/*',
-    'node_modules/inherits/**/*',
-    'node_modules/process-nextick-args/**/*',
-    'node_modules/core-util-is/**/*',
-    'node_modules/isarray/**/*',
-    'node_modules/saxes/**/*',
-    'node_modules/xmlchars/**/*',
-    'node_modules/tmp/**/*',
-    'node_modules/unzipper/**/*',
-    'node_modules/binary/**/*',
-    'node_modules/bluebird/**/*',
-    'node_modules/buffer-alloc/**/*',
-    'node_modules/buffer-fill/**/*',
-    'node_modules/uuid/**/*',
-    'node_modules/graceful-fs/**/*',
-    'node_modules/fs.realpath/**/*',
-    'node_modules/inflight/**/*',
-    'node_modules/minimatch/**/*',
-    'node_modules/once/**/*',
-    'node_modules/wrappy/**/*',
-    'node_modules/lazystream/**/*',
-    'node_modules/normalize-path/**/*',
-    'node_modules/micromatch/**/*',
-    'node_modules/merge2/**/*',
-    'node_modules/fast-glob/**/*',
-    'node_modules/picomatch/**/*',
-    'node_modules/is-glob/**/*',
-    'node_modules/glob-parent/**/*',
-    'node_modules/is-extglob/**/*',
-    'node_modules/braces/**/*',
-    'node_modules/fill-range/**/*',
-    'node_modules/to-regex-range/**/*',
-    'node_modules/is-number/**/*',
-    'node_modules/base64-js/**/*',
-    'node_modules/ieee754/**/*',
-    'node_modules/buffer-from/**/*',
-    'node_modules/immediate/**/*'
+    // tsc 增量编译缓存，无需随包分发
+    '!dist-electron/**/*.tsbuildinfo'
   ],
   win: {
     target: [

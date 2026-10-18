@@ -164,13 +164,14 @@ app.on('window-all-closed', () => {
   }
 })
 
-// 全局异常捕获
+// 全局异常捕获 —— 记录完整堆栈，便于事后诊断（不静默吞掉）
 process.on('uncaughtException', (error) => {
-  log(`未捕获异常: ${error?.message}`)
+  log(`未捕获异常: ${error?.message}\n${error?.stack || '(无堆栈)'}`)
 })
 
-process.on('unhandledRejection', (reason) => {
-  log(`未处理Promise拒绝: ${reason}`)
+process.on('unhandledRejection', (reason: any) => {
+  const detail = reason instanceof Error ? `${reason.message}\n${reason.stack || ''}` : String(reason)
+  log(`未处理Promise拒绝: ${detail}`)
 })
 
 app.on('render-process-gone', (_event, details) => {
