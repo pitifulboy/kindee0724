@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 import SearchableSelect from '../SearchableSelect'
 import { visualization as v, combinedPage as t } from '../../config/appText'
 
@@ -228,6 +228,10 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
   const moveRef = useRef<MoveState | null>(null)
   const geomRef = useRef<{ left: CardGeom; cards: CardGeom[] } | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
+  /** 实例级 clipPath ID 前缀：建模视图同时挂载多个本组件（步骤 2/4/5），
+   *  SVG 的 url(#id) 按 DOM 顺序解析到第一个同名节点——若各实例共用固定 ID，
+   *  后面的实例会裁剪到第一个实例的矩形上（表现为字段行被空白裁没）。 */
+  const uid = useId().replace(/:/g, '')
 
   // 被 matchPairs 引用的匹配键集合
   const keyCols = useMemo(() => {
@@ -702,11 +706,11 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
           onPointerCancel={onSvgPointerCancel}
         >
           <defs>
-            <clipPath id="viz-clip-left">
+            <clipPath id={`${uid}-clip-left`}>
               <rect x={leftX} y={bodyTopOf(leftY)} width={CARD_W} height={leftViewH} />
             </clipPath>
             {rightCards.map(card => (
-              <clipPath key={card.aux.id} id={`viz-clip-${card.aux.id}`}>
+              <clipPath key={card.aux.id} id={`${uid}-clip-${card.aux.id}`}>
                 <rect x={card.x} y={bodyTopOf(card.y)} width={CARD_W} height={card.viewH} />
               </clipPath>
             ))}
@@ -729,7 +733,7 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
             />
           </foreignObject>
 
-          <g clipPath="url(#viz-clip-left)">
+          <g clipPath={`url(#${uid}-clip-left)`}>
             {leftCols.length === 0 ? (
               <text x={leftX + 14} y={rowYOf(leftY, 0, 0)} dominantBaseline="central" fontSize={12} fill="#000000">
                 {leftQ ? v.noMatchField : (hideUnused ? v.noUsedFieldsLeft(leftFieldLabel) : v.noColumnsOf(leftFieldLabel))}
@@ -776,7 +780,7 @@ const LeftJoinModelView: React.FC<LeftJoinModelViewProps> = ({
                 />
               </foreignObject>
 
-              <g clipPath={`url(#viz-clip-${card.aux.id})`}>
+              <g clipPath={`url(#${uid}-clip-${card.aux.id})`}>
                 {card.cols.length === 0 ? (
                   <text x={card.x + 14} y={rowYOf(card.y, 0, 0)} dominantBaseline="central" fontSize={12} fill="#000000">
                     {card.cq ? v.noMatchField : (hideUnused ? v.noUsedFieldsRight : v.noColumns)}
