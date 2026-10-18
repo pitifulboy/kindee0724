@@ -40,7 +40,7 @@ function buildJoinIndex(
  * 执行 left join
  * 将辅助表的列合并到订单表行中
  */
-function leftJoin(
+export function leftJoin(
   orderRows: Record<string, any>[],
   auxRows: Record<string, any>[],
   matchPairs: { orderCol: string; auxCol: string }[],
