@@ -50,6 +50,67 @@ export const DEFAULT_SCHEME: ColorScheme = {
   },
 }
 
+/**
+ * 内置配色方案（全部锁定：不可修改 / 不可删除，可复制为副本后编辑）。
+ * 色值取自 Tailwind 色板：primary=700 阶、accent=600 阶、soft=50 阶、border=200 阶、
+ * modelBg=100 阶，pageBg 为带微弱同色系色相的近白色。
+ */
+export const BUILTIN_SCHEMES: ColorScheme[] = [
+  DEFAULT_SCHEME,
+  {
+    id: 'pink',
+    name: '粉色',
+    locked: true,
+    colors: {
+      pageBg: '#FDF7FA',
+      modelBg: '#FCE7F3',
+      primary: '#BE185D',
+      accent: '#DB2777',
+      primarySoft: '#FDF2F8',
+      primaryBorder: '#FBCFE8',
+    },
+  },
+  {
+    id: 'violet',
+    name: '紫色',
+    locked: true,
+    colors: {
+      pageBg: '#FBFAFE',
+      modelBg: '#EDE9FE',
+      primary: '#6D28D9',
+      accent: '#7C3AED',
+      primarySoft: '#F5F3FF',
+      primaryBorder: '#DDD6FE',
+    },
+  },
+  {
+    id: 'teal',
+    name: '青绿',
+    locked: true,
+    colors: {
+      pageBg: '#F7FCFB',
+      modelBg: '#CCFBF1',
+      primary: '#0F766E',
+      accent: '#0D9488',
+      primarySoft: '#F0FDFA',
+      primaryBorder: '#99F6E4',
+    },
+  },
+  {
+    id: 'orange',
+    name: '暖橙',
+    locked: true,
+    colors: {
+      pageBg: '#FDFBF8',
+      modelBg: '#FFEDD5',
+      primary: '#C2410C',
+      accent: '#EA580C',
+      primarySoft: '#FFF7ED',
+      primaryBorder: '#FED7AA',
+    },
+  },
+]
+
 /** 方案元素顺序与中文标签（编辑区展示顺序） */
 export const SCHEME_ELEMENTS: { key: keyof SchemeColors; label: string }[] = [
   { key: 'pageBg', label: '页面背景' },

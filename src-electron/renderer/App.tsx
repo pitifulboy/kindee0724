@@ -3,7 +3,7 @@ import Sidebar from './components/Sidebar'
 import CombinedPage from './pages/CombinedPage'
 import HelpTip from './components/combined/HelpTip'
 import SettingsDialog from './components/combined/SettingsDialog'
-import { DEFAULT_SCHEME, applySchemeVars } from './components/combined/SettingsDialog'
+import { BUILTIN_SCHEMES, DEFAULT_SCHEME, applySchemeVars } from './components/combined/SettingsDialog'
 import type { ColorScheme, SchemeColors } from './components/combined/SettingsDialog'
 import { app as appText, message as msg, sidebar, combinedPage } from './config/appText'
 import { newId } from './utils/id'
@@ -54,7 +54,7 @@ const App: React.FC = () => {
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  const allSchemes = useMemo(() => [DEFAULT_SCHEME, ...userSchemes], [userSchemes])
+  const allSchemes = useMemo(() => [...BUILTIN_SCHEMES, ...userSchemes], [userSchemes])
   const activeScheme = useMemo(
     () => allSchemes.find(s => s.id === activeSchemeId) ?? DEFAULT_SCHEME,
     [allSchemes, activeSchemeId],
