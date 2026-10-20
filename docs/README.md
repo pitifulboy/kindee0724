@@ -46,12 +46,13 @@ npm install
 npm run dev
 
 # 打包 Windows NSIS 安装包（electron-builder）
-npm run build            # 直接出包，版本号取 package.json 当前值
+npm run build            # 直接出包，版本号取 package.json 当前值（**出包前必须先递增 package.json 版本，见下方注意事项**）
 npm run release          # 出包并自动递增 patch 版本（走 build-release.ps1）
 npm run release:minor    # 递增 minor 后出包
 npm run release:major    # 递增 major 后出包
 ```
 
+> - **每次打包都必须先递增版本号（硬性规定）**：`npm run build` 取的是 `package.json` 当前值，不会自动递增——**禁止用同一个版本号重复出包**。功能新增递增 minor（如 4.1.0 → 4.2.0），缺陷修复递增 patch，大改递增 major；或直接用 `npm run release:minor` 等脚本自动递增。跳过递增会覆盖同名旧安装包，导致无法区分安装包对应哪次功能状态。
 > - 打包前必须确保没有「新味智枢」进程在运行，否则 `app.asar` / `release\win-unpacked\icudtl.dat` 被锁定导致打包失败。
 > - `build-release.ps1` 会自动递增版本并**严格校验 `\d+\.\d+\.\d+` 格式**（历史曾产生非法版本号 `.6.0` 导致 `electron-builder` 报 `Invalid version`，已加固）。
 > - **PowerShell 脚本编码（两个方向，别搞反）**：脚本**自身**必须存为 **UTF-8 with BOM**——它含中文注释与 `═` 框线，无 BOM 时 PowerShell 5.1 会按系统 ANSI（简中 GBK）解码，中文乱码后解析器误判出「意外的标记 `}`」，脚本在递增版本之前就中断；而脚本**写出**文件时显式用 **UTF-8 无 BOM**（`New-Object System.Text.UTF8Encoding($false)`），避免把中文写成乱码。
@@ -79,7 +80,7 @@ npm test            # Vitest 最小单测（配置见 vitest.config.ts）
    - **焦点可见性**：统一用 `.focus-ring`（`focus-visible:ring-2 ring-primary-500`），不要用 `focus:outline-none` 而不给替代焦点指示。
    - **字号下限**：正文 ≥ `text-sm`(14px)，辅助说明 ≥ `text-xs`(12px)；不要使用 `text-[10px]` / `text-[11px]`。
 3. **退出逻辑**：应用退出用 `app.exit(0)` + 800ms `process.exit(0)` 兜底；**禁止** detached 批处理执行 `taskkill`、**禁止**终止 `explorer.exe`（会触发杀软 / 黑屏）。
-4. **版本号（单一来源）**：`package.json.version` 为唯一来源；界面显示的版本由 Vite 在构建期通过 `define` 注入的 `__APP_VERSION__` 派生（见 `src-electron/renderer/config/appText.ts`），**无需再两处手动同步**。打包前只需递增 `package.json` 的版本。
+4. **版本号（单一来源）**：`package.json.version` 为唯一来源；界面显示的版本由 Vite 在构建期通过 `define` 注入的 `__APP_VERSION__` 派生（见 `src-electron/renderer/config/appText.ts`），**无需再两处手动同步**。**每次打包前必须递增 `package.json` 的版本（功能 +1 minor / 修复 +1 patch / 大改 +1 major），禁止同一版本号重复出包**。
 5. **含非 ASCII 的 `.ps1` 必须存为 UTF-8 with BOM**：本机 PowerShell 5.1 对无 BOM 的 `.ps1` 按系统 ANSI（GBK）解码，中文注释 / 框线会乱码并导致语法报错（见 `build-release.ps1` 的历史事故）。`build-release.ps1` 已加 BOM，后续新增 / 改动此类脚本请保持 BOM。同理，`.js` / `.ts` / `.json` / `.md` 一律 UTF-8 无 BOM。
 
 ## 5. 本目录文档索引
@@ -100,9 +101,9 @@ npm test            # Vitest 最小单测（配置见 vitest.config.ts）
 
 - 分支：`XWZS_1004`（工作副本 `D:\myvb\xwzs1004`）
 - 已完成：GitHub 双远程同步、项目副本与分支建立、可视化方案设计与实现、界面1 简化、界面2 拖拽连线 / 关联删除 / 全局+卡内字段搜索 / 卡片可拖动 / 卡内滑动 / 全部展开 / 每表底部展开折叠 / 画布缩放 / 关联字段上浮 / 连接方式下拉（Left/Inner/Right Join）、「合并Excel + 金蝶导入」页重构为 **六步（S1~S6，每步独立执行）** 并把界面1~5 收敛到**「建模视图」单页（可一键平铺展示 1~6 步全部图形，与分步操作双视图切换）**、S4 布局微调（模板表头行移至模板表地址下方）、「序号自增配置」改造为「**自定义填充规则**」模块、S5 取值区顺序与可视化内容调整（数据表取值 / 自定义字段取值）、S5 字段映射可视化按**运行口径**简化为「合并表列 / 自定义字段」、S5 匹配关系完整性修复（连线稳定标识 / 合并表列兜底 / 未完成映射红色提示）、**读表格式扩展（新增 `.xls`（SheetJS BIFF）/ `.csv`（RFC4180 + 编码探测））**、编译自测、v3.6.1 打包出包
-- 产物：`release/新味智枢-v4.1.0-Setup.exe`（NSIS x64）
-- 版本：`4.1.0`（单一来源 `package.json.version`；界面通过构建期注入的 `__APP_VERSION__` 派生）
-- 注意：v4.1.0 在 v4.0.0 基础上新增「设置 → 5 个内置配色方案（默认蓝 / 粉色 / 紫色 / 青绿 / 暖橙，锁定可复制）」；v4.0.0 含 10-18 全部迭代（原表预处理拆分 / 数据转换 / 配色方案体系 / 字号规范 / 测试体系），`typecheck` / `lint` / `test`（31 用例）全绿。
+- 产物：`release/新味智枢-v4.2.0-Setup.exe`（NSIS x64）
+- 版本：`4.2.0`（单一来源 `package.json.version`；界面通过构建期注入的 `__APP_VERSION__` 派生）
+- 注意：v4.2.0 在 v4.1.0 基础上新增「第 4 步多字段匹配 / 第 2 步计算字段 / 保存到项目覆盖修复」，测试扩至 44 用例；v4.1.0 新增「设置 → 5 个内置配色方案（默认蓝 / 粉色 / 紫色 / 青绿 / 暖橙，锁定可复制）」；v4.0.0 含 10-18 全部迭代（原表预处理拆分 / 数据转换 / 配色方案体系 / 字号规范 / 测试体系），`typecheck` / `lint` / `test` 全绿。
 - **代码评审整改（2026-10-06）**：按《代码评审报告-2026-10-05.md》落地全部可安全执行的整改项——
   - P0：发布脚本 UTF-8 编码 + 版本号单源；Sidebar 未选中项白底白字；辅助表拖拽监听器泄漏；`.xls` 白名单收窄为 `.xlsx`；图标源 `icons/myicons.jpg` 入库并在构建脚本加缺图兜底；`package.json` 恢复标准格式。
   - 死代码：删除 excelMerge / kingdeeImport 两套预设管理器及其 IPC / preload / 类型（约 240 行）；删除窗口控制 IPC；清理废弃注释块与旧 `generateImportFile` 入口。
