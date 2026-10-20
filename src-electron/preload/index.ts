@@ -77,8 +77,7 @@ const electronAPI = {
       table1Path: string
       table2Path: string
       groupByColumn: string
-      matchFieldTable1: string
-      matchFieldTable2: string
+      matchPairs: { mergedCol: string; templateCol: string }[]
       startBillNo: number
       billNoStep: number
       billNoBaseField: string

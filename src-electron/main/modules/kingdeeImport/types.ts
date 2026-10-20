@@ -16,6 +16,14 @@ export interface FieldMapping {
   constantValue?: string
 }
 
+/** 目标表匹配键（第 4 步）：两侧字段成对，多组时按组合值联合匹配 */
+export interface TemplateMatchPair {
+  /** 合并结果（明细）侧字段 */
+  mergedCol: string
+  /** 目标表（模板）侧字段 */
+  templateCol: string
+}
+
 /** 自定义填充规则（原「序号自增配置」） */
 export interface SeqConfig {
   id: string

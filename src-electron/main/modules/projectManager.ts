@@ -13,6 +13,8 @@ export interface Step1Preset {
   auxFilePaths: Record<string, string>
   orderColumns: string[]
   auxColumnsMap: Record<string, string[]>
+  /** 计算字段（第 2 步合并后追加的四则运算新列） */
+  computedFields?: Array<{ id: string; name: string; items: Array<{ col: string; op?: string }> }>
 }
 
 /** Step 2 预设：金蝶导入配置 */
@@ -23,8 +25,10 @@ export interface Step2Preset {
   seqConfigs?: Array<{ id: string; name: string; type: string; constantValue: string; start: number; step: number; baseField: string }>
   date: string
   groupByColumn: string
-  matchFieldTable1: string
-  matchFieldTable2: string
+  /** 目标表匹配键（多组）；旧预设仅有 matchFieldTable1/2 单组，读取时自动迁移 */
+  matchPairs?: Array<{ mergedCol: string; templateCol: string }>
+  matchFieldTable1?: string
+  matchFieldTable2?: string
   templateHeaderRowIndex: number
   templateDataStartRowIndex: number
   fieldMappings: any[]

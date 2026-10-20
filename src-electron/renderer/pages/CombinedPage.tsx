@@ -50,6 +50,26 @@ interface SeqConfig {
   step: number
   baseField: string
 }
+/** 第 4 步目标表匹配键（与主进程 kingdeeImport/types.ts 的 TemplateMatchPair 保持一致） */
+interface TemplateMatchPair {
+  /** 合并结果（明细）侧字段 */
+  mergedCol: string
+  /** 目标表（模板）侧字段 */
+  templateCol: string
+}
+/** 计算字段参与项（与主进程 excelMerge/types.ts 保持一致） */
+interface ComputedFieldItem {
+  /** 参与计算的列名 */
+  col: string
+  /** 与前一结果之间的运算符（首项无） */
+  op?: '+' | '-' | '*' | '/'
+}
+/** 计算字段：对第 2 步合并结果做四则运算生成新列 */
+interface ComputedField {
+  id: string
+  name: string
+  items: ComputedFieldItem[]
+}
 /** 第 6 步可选的数据转换规则（与主进程 kingdeeImport/transform.ts 保持一致） */
 type TransformOp = 'textToNumber' | 'numberToText' | 'replace' | 'formula'
 interface TransformRule {
@@ -72,6 +92,29 @@ const sourceTypeOptionsBase = [
 
 /** 可读取的表格文件扩展名（与主进程 file:listExcelFiles 保持一致） */
 const TABLE_FILE_EXTS = ['xlsx', 'xls', 'csv']
+
+/**
+ * 读取项目预设里的目标表匹配键：优先取多组 matchPairs；
+ * 旧项目预设只有 matchFieldTable1 / matchFieldTable2（单组），此处自动迁移为一组。
+ */
+function readMatchPairs(s2: any): TemplateMatchPair[] {
+  if (Array.isArray(s2?.matchPairs) && s2.matchPairs.length > 0) {
+    return s2.matchPairs.map((p: any) => ({
+      mergedCol: p?.mergedCol || '',
+      templateCol: p?.templateCol || '',
+    }))
+  }
+  if (s2?.matchFieldTable1 || s2?.matchFieldTable2) {
+    return [{ mergedCol: s2.matchFieldTable1 || '', templateCol: s2.matchFieldTable2 || '' }]
+  }
+  return [{ mergedCol: '', templateCol: '' }]
+}
+
+/** 校验匹配键：返回第一个未填完的组号（从 1 起）；全部填好返回 0 */
+function firstIncompleteMatchPair(pairs: TemplateMatchPair[]): number {
+  const idx = pairs.findIndex(p => !p.mergedCol || !p.templateCol)
+  return idx === -1 ? 0 : idx + 1
+}
 
 /** 六个环节的标题（顶部步骤条与建模视图共用同一份文案） */
 const STEP_TITLES = [t.stepS1Title, t.stepS2Title, t.stepS3Title, t.stepS4Title, t.stepS5Title, t.stepS6Title]
@@ -102,6 +145,8 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
   const [orderFiles, setOrderFiles] = useState<OrderFile[]>([])
   const [auxTables, setAuxTables] = useState<AuxTableConfig[]>([])
   const [auxFilePaths, setAuxFilePaths] = useState<Record<string, string>>({})
+  // 计算字段：第 2 步合并后追加的四则运算新列（后续步骤可作为匹配/填充字段选用）
+  const [computedFields, setComputedFields] = useState<ComputedField[]>([])
   const [orderColumns, setOrderColumns] = useState<string[]>([])
   const [auxColumnsMap, setAuxColumnsMap] = useState<Record<string, string[]>>({})
   const [mergeProgress, setMergeProgress] = useState<ExcelMergeProgress | null>(null)
@@ -116,8 +161,8 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
   const [outputPrefix, setOutputPrefix] = useState(t.defaultOutputPrefix)
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [groupByColumn, setGroupByColumn] = useState('')
-  const [matchFieldTable1, setMatchFieldTable1] = useState('')
-  const [matchFieldTable2, setMatchFieldTable2] = useState('')
+  /** 目标表匹配键：默认为 1 组，可「+ 添加匹配列」扩展为多组联合匹配 */
+  const [matchPairs, setMatchPairs] = useState<TemplateMatchPair[]>([{ mergedCol: '', templateCol: '' }])
   const [templateHeaderRowIndex, setTemplateHeaderRowIndex] = useState(1)
   // 数据起始行自动为表头行 + 1
   const templateDataStartRowIndex = templateHeaderRowIndex + 1
@@ -251,6 +296,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       setAuxFilePaths(s1.auxFilePaths || {})
       setOrderColumns(s1.orderColumns || [])
       setAuxColumnsMap(s1.auxColumnsMap || {})
+      setComputedFields(Array.isArray(s1.computedFields) ? s1.computedFields : [])
     }
     // 加载 Step2 预设
     if (project.step2Preset) {
@@ -270,8 +316,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       }
       setDate(s2.date || new Date().toISOString().slice(0, 10))
       setGroupByColumn(s2.groupByColumn || '')
-      setMatchFieldTable1(s2.matchFieldTable1 || '')
-      setMatchFieldTable2(s2.matchFieldTable2 || '')
+      setMatchPairs(readMatchPairs(s2))
       setTemplateHeaderRowIndex(s2.templateHeaderRowIndex ?? 1)
       setFieldMappings((s2.fieldMappings || []).map((m: any) => {
         // 迁移旧的 sourceType 到新的 seq ID
@@ -358,13 +403,14 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
   const handleClearAllConfig = () => {
     setOrderFiles([]); setAuxTables([])
     setAuxFilePaths({}); setAuxColumnsMap({}); setOrderColumns([])
+    setComputedFields([])
     setTable2Path(''); setOutputPrefix(t.defaultOutputPrefix)
     setSeqConfigs([
       { id: 'seq-billNo', name: '单号自增', type: 'fieldBased', constantValue: '', start: 111111, step: 1, baseField: '' },
       { id: 'seq-detailSeq', name: '明细序号自增', type: 'fieldBased', constantValue: '', start: 1, step: 1, baseField: '' },
       { id: 'seq-financialSeq', name: '财务序号', type: 'sequential', constantValue: '', start: 1, step: 1, baseField: '' },
     ]); setDate(new Date().toISOString().slice(0, 10))
-    setGroupByColumn(''); setMatchFieldTable1(''); setMatchFieldTable2('')
+    setGroupByColumn(''); setMatchPairs([{ mergedCol: '', templateCol: '' }])
     setTemplateHeaderRowIndex(1)
     setFieldMappings([]); setKingdeeTextCols([])
     setTable1Columns([]); setTemplateColumns([])
@@ -379,11 +425,12 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
     try {
       if (!project) { setToast({ type: 'error', msg: t.noProjectSelected }); return }
       const step1Preset = {
-        orderFiles, auxTables, auxFilePaths, orderColumns, auxColumnsMap
+        orderFiles, auxTables, auxFilePaths, orderColumns, auxColumnsMap, computedFields
       }
       const res = await window.electronAPI.project.updateStep1(project.id, step1Preset)
       if (res.success) {
-        onProjectUpdate({ ...project, step1Preset })
+        // 函数式更新：仅覆盖 step1Preset，避免与紧接着的 step2 保存互相覆盖
+        onProjectUpdate((prev: any) => (prev ? { ...prev, step1Preset } : prev))
         onRefreshProjectList()
         setToast({ type: 'success', msg: t.presetSaved })
       } else {
@@ -398,13 +445,14 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       if (!project) { setToast({ type: 'error', msg: t.noProjectSelected }); return }
       const step2Preset = {
         table2Path, outputDir, outputPrefix, seqConfigs, date,
-        groupByColumn, matchFieldTable1, matchFieldTable2,
+        groupByColumn, matchPairs,
         templateHeaderRowIndex, templateDataStartRowIndex,
         fieldMappings, textFormatColumns: kingdeeTextCols, transforms: transformRules
       }
       const res = await window.electronAPI.project.updateStep2(project.id, step2Preset)
       if (res.success) {
-        onProjectUpdate({ ...project, step2Preset })
+        // 函数式更新：仅覆盖 step2Preset，避免与 handleSaveStep1Preset 的同一次保存互相覆盖
+        onProjectUpdate((prev: any) => (prev ? { ...prev, step2Preset } : prev))
         onRefreshProjectList()
         setToast({ type: 'success', msg: t.presetStep2Saved })
       } else {
@@ -418,6 +466,53 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
     if (!project) { setToast({ type: 'error', msg: t.noProjectSelected }); return }
     await handleSaveStep1Preset()
     await handleSaveStep2Preset()
+  }
+
+  // ─── 计算字段（第 2 步合并后追加的四则运算新列）───
+  /** 参与字段的可选列：优先用最近一次合并结果的列；尚未执行过时由原表列 + 各辅助表列拼出 */
+  const computedColOptions = useMemo(() => {
+    if (table1Columns.length > 0) return table1Columns
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const c of [...orderColumns, ...auxTables.flatMap(a => auxColumnsMap[a.id] || [])]) {
+      if (c && !seen.has(c)) { seen.add(c); out.push(c) }
+    }
+    return out
+  }, [table1Columns, orderColumns, auxTables, auxColumnsMap])
+
+  const addComputedField = () =>
+    setComputedFields(prev => [...prev, { id: newId(), name: '', items: [{ col: '' }, { col: '', op: '+' }] }])
+  const removeComputedField = (id: string) =>
+    setComputedFields(prev => prev.filter(f => f.id !== id))
+  const updateComputedField = (id: string, patch: Partial<ComputedField>) =>
+    setComputedFields(prev => prev.map(f => (f.id === id ? { ...f, ...patch } : f)))
+  const updateComputedItemAt = (id: string, ii: number, patch: Partial<ComputedFieldItem>) =>
+    setComputedFields(prev => prev.map(f => (f.id === id ? { ...f, items: f.items.map((it, i) => (i === ii ? { ...it, ...patch } : it)) } : f)))
+  const addComputedItemAt = (id: string) =>
+    setComputedFields(prev => prev.map(f => (f.id === id ? { ...f, items: [...f.items, { col: '', op: '+' }] } : f)))
+  const removeComputedItemAt = (id: string, ii: number) =>
+    setComputedFields(prev => prev.map(f => (f.id === id ? { ...f, items: f.items.length <= 1 ? f.items : f.items.filter((_, i) => i !== ii) } : f)))
+
+  /** 校验计算字段配置：返回错误文案，空串表示通过 */
+  const computedFieldsError = (): string => {
+    for (let i = 0; i < computedFields.length; i++) {
+      const f = computedFields[i]
+      const label = f.name.trim() || `第 ${i + 1} 个`
+      if (!f.name.trim() || !f.items[0]?.col) return t.validateComputedIncomplete(label)
+      for (let ii = 1; ii < f.items.length; ii++) {
+        if (!f.items[ii].op || !f.items[ii].col) return t.validateComputedIncomplete(label)
+      }
+    }
+    // 结果列名不得重复（含与合并结果已有列重名：重名会覆盖原列，破坏后续步骤的数据口径）。
+    // 计算字段自己上次生成的列（已在 table1Columns 里）不算冲突。
+    const allNames = computedFields.map(f => f.name.trim()).filter(Boolean)
+    const dup = allNames.find((n, i) => allNames.indexOf(n) !== i)
+    if (dup) return t.validateComputedNameConflict(dup)
+    for (const f of computedFields) {
+      const n = f.name.trim()
+      if (n && computedColOptions.includes(n) && !allNames.includes(n)) return t.validateComputedNameConflict(n)
+    }
+    return ''
   }
 
   // handleLoadRecommended 与文本格式列相关函数已随废弃 UI 一并删除（原注释块）。
@@ -495,27 +590,36 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
     updateAuxTable(auxId, { how })
 
   // ─── 界面4：第二步「模板匹配」——复用 LeftJoinModelView（模板表作左表，拆分明细表作右表）───
+  // 左卡 = 目标表（模板侧），右卡 = 拆分明细表（mergedCol 侧）；多组匹配键逐条连线
   const templateMatchAuxTables = useMemo(() => [{
     id: 'tmpl-detail',
     name: '拆分明细表',
     fileName: '',
-    matchPairs: (matchFieldTable1 || matchFieldTable2)
-      ? [{ orderCol: matchFieldTable2, auxCol: matchFieldTable1 }]
-      : [],
+    matchPairs: matchPairs
+      .filter(p => p.mergedCol || p.templateCol)
+      .map(p => ({ orderCol: p.templateCol, auxCol: p.mergedCol })),
     how: 'left' as const,
-  }], [matchFieldTable1, matchFieldTable2])
+  }], [matchPairs])
   const templateMatchAuxColumnsMap = useMemo(() => ({
     'tmpl-detail': table1Columns.length > 0 ? table1Columns : orderColumns,
   }), [table1Columns, orderColumns])
-  // 改/建关联 → 写回 matchFieldTable2（模板侧键）与 matchFieldTable1（明细侧键）
-  const updateTemplateMatchPair = (_auxId: string, _pi: number, field: 'orderCol' | 'auxCol', value: string) => {
-    if (field === 'orderCol') setMatchFieldTable2(value)
-    else setMatchFieldTable1(value)
-  }
+  // 改/建关联 → 写回对应那一组（orderCol = 目标表侧，auxCol = 合并结果侧）
+  const updateMatchPairAt = (pi: number, field: 'mergedCol' | 'templateCol', value: string) =>
+    setMatchPairs(prev => prev.map((p, i) => i === pi ? { ...p, [field]: value } : p))
+  const addMatchPairAt = () =>
+    setMatchPairs(prev => [...prev, { mergedCol: '', templateCol: '' }])
+  const removeMatchPairAt = (pi: number) =>
+    setMatchPairs(prev => prev.length <= 1 ? prev : prev.filter((_, i) => i !== pi))
+  const updateTemplateMatchPair = (_auxId: string, pi: number, field: 'orderCol' | 'auxCol', value: string) =>
+    updateMatchPairAt(pi, field === 'orderCol' ? 'templateCol' : 'mergedCol', value)
   const connectTemplateMatch = (_auxId: string, orderCol: string, auxCol: string) => {
-    setMatchFieldTable2(orderCol)
-    setMatchFieldTable1(auxCol)
+    setMatchPairs(prev => {
+      if (prev.some(p => p.templateCol === orderCol && p.mergedCol === auxCol)) return prev
+      const kept = prev.filter(p => p.mergedCol || p.templateCol)
+      return [...kept, { mergedCol: auxCol, templateCol: orderCol }]
+    })
   }
+  const removeTemplateMatchPair = (_auxId: string, pi: number) => removeMatchPairAt(pi)
 
   // ─── 字段映射（数据表取值）→ 复用 LeftJoinModelView（模板表 ←→ 数据表，字段级匹配）───
   const mappingPairs = useMemo(
@@ -949,6 +1053,8 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
         if (!pair.orderCol || !pair.auxCol) { setToast({ type: 'error', msg: t.validateAuxIncomplete(aux.name) }); return }
       }
     }
+    const cfError = computedFieldsError()
+    if (cfError) { setToast({ type: 'error', msg: cfError }); return }
 
     // 辅助表结构检测（跨文件重名列）：只提示，用户可点「仍然继续合并」
     if (await blockOnMergeCheck(auxCheckPassedRef, checkAuxDuplicateColumns, () => { auxCheckPassedRef.current = true; setMergeCheck(null); void handleStep2JoinAux() })) return
@@ -968,6 +1074,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       const joinRes = await window.electronAPI.excelMerge.joinAux({
         inputPath: rawMergedPath,
         auxFilePaths,
+        computedFields,
         config: {
           name: project?.name || '临时配置', orderSubFolder: '', auxSubFolder: '',
           textColumns: [], auxiliaryTables: auxTables, outputFileName: t.defaultMergeOutput,
@@ -1019,13 +1126,15 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
     if (!step1Done || !step1MergedPath) { setToast({ type: 'error', msg: t.needStep1First }); return }
     if (!table2Path) { setToast({ type: 'error', msg: t.validateNoTemplate }); return }
     if (!groupByColumn) { setToast({ type: 'error', msg: t.validateNoGroupBy }); return }
-    if (!matchFieldTable1 || !matchFieldTable2) { setToast({ type: 'error', msg: t.validateNoMatchField }); return }
+    if (matchPairs.length === 0) { setToast({ type: 'error', msg: t.validateNoMatchField }); return }
+    const badPair = firstIncompleteMatchPair(matchPairs)
+    if (badPair > 0) { setToast({ type: 'error', msg: t.validateMatchPairIncomplete(badPair) }); return }
     setActiveStep(4)
     setS4Executing(true); setS4Dir(''); setS5FilledFiles([]); setFinalResult(null); setMergeProgressLogs([])
     try {
       const tmpDir = await window.electronAPI.app.getPath('temp')
       setExecutePhase(t.progressStep2a)
-      const s21 = await window.electronAPI.kingdeeImport.step2a({ table1Path: step1MergedPath, table2Path, groupByColumn, matchFieldTable1, matchFieldTable2, startBillNo, billNoStep, billNoBaseField, templateHeaderRowIndex, templateDataStartRowIndex, outputDir: tmpDir })
+      const s21 = await window.electronAPI.kingdeeImport.step2a({ table1Path: step1MergedPath, table2Path, groupByColumn, matchPairs, startBillNo, billNoStep, billNoBaseField, templateHeaderRowIndex, templateDataStartRowIndex, outputDir: tmpDir })
       if (!s21.success) { setToast({ type: 'error', msg: s21.error || t.progressStep2aFail }); return }
       setMergeProgressLogs(prev => [...prev, t.progressStep2aDone])
       setExecutePhase(t.progressStep2b)
@@ -1056,7 +1165,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
     try {
       const tmpDir = await window.electronAPI.app.getPath('temp')
       setExecutePhase(t.progressStep2c)
-      const s23 = await window.electronAPI.kingdeeImport.step2c({ inputDir: s4Dir, fieldMappings, date, matchFieldTable1, matchFieldTable2, templateHeaderRowIndex, templateDataStartRowIndex, table2Path, outputDir: tmpDir, seqConfigs })
+      const s23 = await window.electronAPI.kingdeeImport.step2c({ inputDir: s4Dir, fieldMappings, date, matchFieldTable1: matchPairs[0]?.mergedCol || '', matchFieldTable2: matchPairs[0]?.templateCol || '', templateHeaderRowIndex, templateDataStartRowIndex, table2Path, outputDir: tmpDir, seqConfigs })
       if (!s23.success) { setToast({ type: 'error', msg: s23.error || t.progressStep2cFail }); return }
       setMergeProgressLogs(prev => [...prev, t.progressStep2cDone])
       setExecutePhase(t.progressStep2d)
@@ -1115,10 +1224,14 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
         if (!pair.orderCol || !pair.auxCol) { setToast({ type: 'error', msg: t.validateAuxIncomplete(aux.name) }); return }
       }
     }
+    const cfErrorAll = computedFieldsError()
+    if (cfErrorAll) { setToast({ type: 'error', msg: cfErrorAll }); return }
     // Step2 校验
     if (!table2Path) { setToast({ type: 'error', msg: t.validateNoTemplate }); return }
     if (!groupByColumn) { setToast({ type: 'error', msg: t.validateNoGroupBy }); return }
-    if (!matchFieldTable1 || !matchFieldTable2) { setToast({ type: 'error', msg: t.validateNoMatchField }); return }
+    if (matchPairs.length === 0) { setToast({ type: 'error', msg: t.validateNoMatchField }); return }
+    const badPairAll = firstIncompleteMatchPair(matchPairs)
+    if (badPairAll > 0) { setToast({ type: 'error', msg: t.validateMatchPairIncomplete(badPairAll) }); return }
     if (fieldMappings.length === 0) { setToast({ type: 'error', msg: t.validateNoFieldMapping }); return }
     if (!outputDir) { setToast({ type: 'error', msg: t.validateNoOutputDir }); return }
     // 校验所有 fieldBased 类型的 seq 配置是否配置了 baseField
@@ -1176,6 +1289,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       const joinRes = await window.electronAPI.excelMerge.joinAux({
         inputPath: rawPath,
         auxFilePaths,
+        computedFields,
         config: {
           name: project.name, orderSubFolder: '', auxSubFolder: '',
           textColumns: [], auxiliaryTables: auxTables, outputFileName: t.defaultMergeOutput,
@@ -1204,7 +1318,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
       setS3Result({ outputPath: s1.data.outputPath })
 
       setExecutePhase(t.progressStep2a)
-      const s21 = await window.electronAPI.kingdeeImport.step2a({ table1Path: mergedPath, table2Path, groupByColumn, matchFieldTable1, matchFieldTable2, startBillNo, billNoStep, billNoBaseField, templateHeaderRowIndex, templateDataStartRowIndex, outputDir: tmpDir })
+      const s21 = await window.electronAPI.kingdeeImport.step2a({ table1Path: mergedPath, table2Path, groupByColumn, matchPairs, startBillNo, billNoStep, billNoBaseField, templateHeaderRowIndex, templateDataStartRowIndex, outputDir: tmpDir })
       if (!s21.success) { setToast({ type: 'error', msg: s21.error || t.progressStep2aFail }); setStep2Executing(false); setIsRunAll(false); return }
       setMergeProgressLogs(prev => [...prev, t.progressStep2aDone])
 
@@ -1216,7 +1330,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
 
       setExecutePhase(t.progressStep2c)
       const s22Dir = s22.data.outputPath.replace(/\\[^\\]+$/, '')
-      const s23 = await window.electronAPI.kingdeeImport.step2c({ inputDir: s22Dir, fieldMappings, date, matchFieldTable1, matchFieldTable2, templateHeaderRowIndex, templateDataStartRowIndex, table2Path, outputDir: tmpDir, seqConfigs })
+      const s23 = await window.electronAPI.kingdeeImport.step2c({ inputDir: s22Dir, fieldMappings, date, matchFieldTable1: matchPairs[0]?.mergedCol || '', matchFieldTable2: matchPairs[0]?.templateCol || '', templateHeaderRowIndex, templateDataStartRowIndex, table2Path, outputDir: tmpDir, seqConfigs })
       if (!s23.success) { setToast({ type: 'error', msg: s23.error || t.progressStep2cFail }); setStep2Executing(false); setIsRunAll(false); return }
       setMergeProgressLogs(prev => [...prev, t.progressStep2cDone])
 
@@ -1316,6 +1430,7 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
             auxColumnsMap={templateMatchAuxColumnsMap}
             onChangeMatchPair={updateTemplateMatchPair}
             onConnect={connectTemplateMatch}
+            onRemoveMatchPair={removeTemplateMatchPair}
             leftTitle={t.templateMatchLeftTitle}
             toolbarTitle={t.templateMatchToolbar}
             leftFieldLabel={t.templateMatchLeftTitle}
@@ -1608,6 +1723,60 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
             </div>
           </div>
 
+          {/* 计算字段（可选）：对合并结果做四则运算生成新列，后续步骤（如目标表匹配）可选用 */}
+          <div className="mb-3">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-semibold text-black flex items-center gap-1">{t.sectionComputedFields}<HelpTip text={t.hintComputedFields} label={t.helpComputedFields} /></h3>
+              <button onClick={addComputedField} disabled={isExecuting} className="btn-primary btn-press text-sm focus-ring">{t.btnAddComputedField}</button>
+            </div>
+            {computedFields.length === 0 && (
+              <p className="text-sm text-black text-center py-4 border-2 border-dashed border-gray-200 rounded-lg">{t.noComputedField}</p>
+            )}
+            <div className="space-y-3">
+              {computedFields.map((cf, cfIndex) => (
+                <div key={cf.id} className="border-2 border-gray-200 rounded-lg p-3 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center space-x-2 min-w-0">
+                      <span className="w-5 h-5 bg-primary-800 text-white rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">{cfIndex + 1}</span>
+                      <input type="text" value={cf.name} onChange={e => updateComputedField(cf.id, { name: e.target.value })}
+                        disabled={isExecuting} placeholder={t.placeholderComputedName} aria-label={t.labelComputedName}
+                        className="text-sm font-medium text-black bg-transparent border-b border-transparent hover:border-gray-300 focus-ring px-1 min-w-0 placeholder:text-black/40" />
+                    </div>
+                    <button onClick={() => removeComputedField(cf.id)} disabled={isExecuting}
+                      className="px-2 py-1 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 flex-shrink-0">{t.btnDelete}</button>
+                  </div>
+                  {cf.items.map((item, ii) => (
+                    <div key={ii} className="flex items-center space-x-2 mb-1.5">
+                      {ii > 0 && (
+                        <select value={item.op} onChange={e => updateComputedItemAt(cf.id, ii, { op: e.target.value as ComputedFieldItem['op'] })}
+                          disabled={isExecuting} aria-label={`运算符 ${ii + 1}`}
+                          className="px-2 py-1.5 text-sm border border-gray-200 rounded focus-ring w-14 flex-shrink-0">
+                          <option value="+">+</option>
+                          <option value="-">−</option>
+                          <option value="*">×</option>
+                          <option value="/">÷</option>
+                        </select>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <SearchableSelect value={item.col} options={computedColOptions}
+                          onChange={v => updateComputedItemAt(cf.id, ii, { col: v })}
+                          placeholder={t.placeholderSelectCol} disabled={isExecuting}
+                          ariaLabel={`参与字段 ${ii + 1}`} />
+                      </div>
+                      {cf.items.length > 1 && (
+                        <button onClick={() => removeComputedItemAt(cf.id, ii)} disabled={isExecuting}
+                          aria-label={`删除参与字段 ${ii + 1}`}
+                          className="flex-shrink-0 w-7 h-7 flex items-center justify-center text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 focus-ring">✕</button>
+                      )}
+                    </div>
+                  ))}
+                  <button onClick={() => addComputedItemAt(cf.id)} disabled={isExecuting}
+                    className="text-sm text-black hover:text-primary-700 mt-1 focus-ring rounded">{t.btnAddComputedItem}</button>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* 关联建模已移到可视化视图（第 2 步），此处仅保留配置项；执行按钮在标题行 */}
 
           {/* S2 — 合并结果（成功态用绿色语义色） */}
@@ -1753,20 +1922,43 @@ const CombinedPage: React.FC<CombinedPageProps> = ({ project, onProjectUpdate, o
             className="max-w-64 flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded focus-ring disabled:bg-gray-50" />
         </div>
 
-        {/* 匹配列 */}
-        <div className="space-y-3 mb-1">
-          <div className="flex items-center space-x-3">
-            <label className="text-sm text-black w-32 flex-shrink-0 flex items-center gap-1">{t.labelMatchFieldTable}<HelpTip text={t.hintMatchField} label={t.helpMatchField} /></label>
-            <div className="flex-1">
-              <SearchableSelect value={matchFieldTable1} options={table1Columns} onChange={setMatchFieldTable1}
-                placeholder={t.selectPlaceholder} disabled={isExecuting} ariaLabel={t.labelMatchFieldTable} />
-            </div>
-          </div>
-          <div className="flex items-center space-x-3">
-            <label className="text-sm text-black w-32 flex-shrink-0">{t.labelMatchFieldTemplate}</label>
-            <div className="flex-1">
-              <SearchableSelect value={matchFieldTable2} options={templateColumns} onChange={setMatchFieldTable2}
-                placeholder={t.selectPlaceholder} disabled={isExecuting} ariaLabel={t.labelMatchFieldTemplate} />
+        {/* 匹配列（可多组：多列组合定位同一条目标表记录） */}
+        <div className="mb-1">
+          <div className="flex items-start space-x-3">
+            <label className="text-sm text-black w-32 flex-shrink-0 flex items-center gap-1 pt-0.5">{t.labelMatchField}<HelpTip text={t.hintMatchField} label={t.helpMatchField} /></label>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center space-x-2 mb-1 text-sm text-black/70">
+                <span className="flex-1 min-w-0 truncate">{t.labelMatchFieldTable}</span>
+                <span className="w-4 flex-shrink-0" aria-hidden="true" />
+                <span className="flex-1 min-w-0 truncate">{t.labelMatchFieldTemplate}</span>
+                <span className="w-7 flex-shrink-0" aria-hidden="true" />
+              </div>
+              {matchPairs.map((pair, pi) => (
+                <div key={pi} className="flex items-center space-x-2 mb-1.5">
+                  <div className="flex-1 min-w-0">
+                    <SearchableSelect value={pair.mergedCol} options={table1Columns}
+                      onChange={v => updateMatchPairAt(pi, 'mergedCol', v)}
+                      placeholder={t.placeholderSelectCol} disabled={isExecuting}
+                      ariaLabel={`${t.labelMatchFieldTable} ${pi + 1}`} />
+                  </div>
+                  <span className="w-4 text-center text-black flex-shrink-0" aria-hidden="true">↔</span>
+                  <div className="flex-1 min-w-0">
+                    <SearchableSelect value={pair.templateCol} options={templateColumns}
+                      onChange={v => updateMatchPairAt(pi, 'templateCol', v)}
+                      placeholder={t.placeholderSelectCol} disabled={isExecuting}
+                      ariaLabel={`${t.labelMatchFieldTemplate} ${pi + 1}`} />
+                  </div>
+                  {matchPairs.length > 1 ? (
+                    <button onClick={() => removeMatchPairAt(pi)} disabled={isExecuting}
+                      aria-label={`删除第 ${pi + 1} 组匹配列`}
+                      className="flex-shrink-0 w-7 h-7 flex items-center justify-center text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 focus-ring">✕</button>
+                  ) : (
+                    <span className="w-7 flex-shrink-0" aria-hidden="true" />
+                  )}
+                </div>
+              ))}
+              <button onClick={addMatchPairAt} disabled={isExecuting}
+                className="text-sm text-black hover:text-primary-700 focus-ring rounded">{t.btnAddMatchField}</button>
             </div>
           </div>
         </div>

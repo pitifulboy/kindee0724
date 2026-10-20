@@ -3,6 +3,7 @@ import {
   getTable1Columns, getTemplateColumns,
   step1SplitOrders, step2aJoin, step2bDeleteUnmatched, step2cFillData, step2dRestoreStructure, step3MergeTemplates
 } from './service'
+import type { TemplateMatchPair } from './types'
 
 // 说明：mainWindow 目前不再使用（旧的一键生成入口已废弃，进度改由前端分步轮询/日志呈现）。
 // 保留形参以兼容 registerIpcHandlers 的统一调用签名。
@@ -52,8 +53,7 @@ export function registerKingdeeImportHandlers(_mainWindow: BrowserWindow) {
     table1Path: string
     table2Path: string
     groupByColumn: string
-    matchFieldTable1: string
-    matchFieldTable2: string
+    matchPairs: TemplateMatchPair[]
     startBillNo: number
     billNoStep: number
     billNoBaseField: string
@@ -66,8 +66,7 @@ export function registerKingdeeImportHandlers(_mainWindow: BrowserWindow) {
         params.table1Path,
         params.table2Path,
         params.groupByColumn,
-        params.matchFieldTable1,
-        params.matchFieldTable2,
+        params.matchPairs,
         params.startBillNo,
         params.billNoStep,
         params.billNoBaseField,

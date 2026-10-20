@@ -14,7 +14,8 @@ import type {
   JoinAuxParams,
   ExcelMergeProgress,
   ExcelMergeResult,
-  AuxTableConfig
+  AuxTableConfig,
+  ComputedField
 } from './types'
 
 /**
@@ -356,6 +357,54 @@ export async function mergeExcelData(
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 计算字段：四则运算生成新列
+// ═══════════════════════════════════════════════════════════════
+
+/** 参与计算的值转数字：文本数字可解析，空单元格 / 无法解析的按 0 处理 */
+export function toComputeNumber(val: any): number {
+  if (typeof val === 'number') return Number.isFinite(val) ? val : 0
+  const n = Number(String(val ?? '').trim())
+  return Number.isFinite(n) ? n : 0
+}
+
+/**
+ * 按链式顺序计算一个计算字段在某行的值：
+ * ((第1项 op 第2项) op 第3项 ...)，从上到下依次计算，不做乘除优先。
+ * 除以 0 等非法结果返回 ''（留空）。
+ */
+export function evalComputedField(f: ComputedField, row: Record<string, any>): number | '' {
+  if (f.items.length === 0) return ''
+  let acc = toComputeNumber(row[f.items[0].col])
+  for (let i = 1; i < f.items.length; i++) {
+    const v = toComputeNumber(row[f.items[i].col])
+    switch (f.items[i].op) {
+      case '+': acc = acc + v; break
+      case '-': acc = acc - v; break
+      case '*': acc = acc * v; break
+      case '/':
+        if (v === 0) return ''
+        acc = acc / v
+        break
+      default: return ''
+    }
+  }
+  if (!Number.isFinite(acc)) return ''
+  // 抹平浮点噪声（0.1+0.2 → 0.3）
+  return Math.round(acc * 1e10) / 1e10
+}
+
+/** 把计算字段作为新列写入所有行（写盘前调用，列名会被 writeResultFile 自动收集） */
+export function applyComputedFields(rows: Record<string, any>[], computedFields: ComputedField[]): void {
+  for (const f of computedFields) {
+    const name = f.name.trim()
+    if (!name) continue
+    for (const row of rows) {
+      row[name] = evalComputedField(f, row)
+    }
+  }
+}
+
 /**
  * 第 2 步独立执行：读取「合并原表」产物，逐一 join 辅助表并写出最终结果
  */
@@ -404,6 +453,11 @@ export async function joinAuxExcelData(
   // ─── 3. 读取辅助表并逐一 join ───
   const joinResult = await joinAuxTables(orderRows, auxFilePaths, config.auxiliaryTables, onProgress, ctx)
   orderRows = joinResult.rows
+
+  // ─── 3.5 计算字段：对合并结果做四则运算，追加新列 ───
+  if (params.computedFields && params.computedFields.length > 0) {
+    applyComputedFields(orderRows, params.computedFields)
+  }
 
   // ─── 4. 收集列名并写入输出文件 ───
   const outputFileName = params.outputFileName || config.outputFileName || '合并结果.xlsx'

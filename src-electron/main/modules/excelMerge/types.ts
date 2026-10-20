@@ -51,6 +51,20 @@ export interface JoinAuxParams {
   config: PresetConfig               // 预设配置（使用 auxiliaryTables / outputFileName）
   outputDir: string                  // 输出目录
   outputFileName?: string            // 覆盖输出文件名（默认取 config.outputFileName）
+  computedFields?: ComputedField[]   // 计算字段（可选）：合并后追加的四则运算新列
+}
+
+// 计算字段参与项：首项无 op，后续项为与前一结果之间的运算符
+export interface ComputedFieldItem {
+  col: string                        // 参与计算的列名
+  op?: '+' | '-' | '*' | '/'         // 运算符（首项无）
+}
+
+// 计算字段：对合并结果按列做四则运算生成新列（参与值自动转数字，按从上到下顺序链式计算）
+export interface ComputedField {
+  id: string                         // 唯一标识（前端生成）
+  name: string                       // 结果列名
+  items: ComputedFieldItem[]         // 参与计算的字段链
 }
 
 // 合并进度

@@ -20,7 +20,7 @@ import {
 } from '../../shared/excel'
 import { applyTransforms } from './transform'
 import type { TransformRule } from './transform'
-import type { FieldMapping, SeqConfig } from './types'
+import type { FieldMapping, SeqConfig, TemplateMatchPair } from './types'
 
 // ═══════════════════════════════════════════════════════════════
 // 列名读取（前端字段下拉）
@@ -129,8 +129,7 @@ export async function step2aJoin(
   table1Path: string,
   table2Path: string,
   groupByColumn: string,
-  matchFieldTable1: string,
-  matchFieldTable2: string,
+  matchPairs: TemplateMatchPair[],
   startBillNo: number,
   billNoStep: number,
   billNoBaseField: string,
@@ -138,15 +137,36 @@ export async function step2aJoin(
   templateDataStartRowIndex: number,
   outputDir: string
 ): Promise<Step2aOutput> {
+  if (matchPairs.length === 0) {
+    throw new Error('没有配置匹配列，请在第 4 步至少添加一组匹配列')
+  }
+
   const { rows: table1Rows } = await readTable(table1Path)
   const { colMap, allRows, columns: table2Cols } = await readTemplate(
     table2Path, templateHeaderRowIndex, templateDataStartRowIndex
   )
 
-  const templateMatchColIdx = colMap[matchFieldTable2]
-  if (templateMatchColIdx === undefined) {
-    throw new Error(`模板表中未找到匹配字段: ${matchFieldTable2}`)
+  for (const pair of matchPairs) {
+    if (colMap[pair.templateCol] === undefined) {
+      throw new Error(`模板表中未找到匹配字段: ${pair.templateCol}`)
+    }
   }
+
+  const mergedMatchCols = matchPairs.map(p => p.mergedCol)
+  const templateMatchCols = matchPairs.map(p => p.templateCol)
+  const dataCols = table1Rows.length > 0 ? Object.keys(table1Rows[0]) : []
+  for (const col of mergedMatchCols) {
+    if (!dataCols.includes(col)) {
+      throw new Error(`合并结果表中未找到匹配字段: ${col}`)
+    }
+  }
+
+  /**
+   * 组合匹配键：多组匹配列按顺序取值拼接。
+   * 明细行与模板行共用同一函数，保证两侧口径一致（多组即联合匹配）。
+   */
+  const comboKey = (row: Record<string, any>, cols: string[]) =>
+    cols.map(c => strictKey(row[c])).join('\x00')
 
   const templateDataStart = templateDataStartRowIndex - 1
   const templateRows: Record<string, any>[] = []
@@ -166,7 +186,7 @@ export async function step2aJoin(
     groups.get(key)!.push(row)
   }
 
-  // Build per-group data lookup map: matchFieldTable1 value -> data items[]
+  // Build per-group data lookup map: 匹配列组合值 -> data items[]
   const groupDataMap = new Map<string, Map<string, Record<string, any>[]>>()
   // 记录每组首行（排序用），避免排序比较器内 Array.find 造成的 O(n²)
   const groupFirstRow = new Map<string, Record<string, any>>()
@@ -174,7 +194,7 @@ export async function step2aJoin(
     groupFirstRow.set(orderKey, items[0] ?? {})
     const dataMap = new Map<string, Record<string, any>[]>()
     for (const item of items) {
-      const key = strictKey(item[matchFieldTable1])
+      const key = comboKey(item, mergedMatchCols)
       if (!dataMap.has(key)) dataMap.set(key, [])
       dataMap.get(key)!.push(item)
     }
@@ -191,7 +211,6 @@ export async function step2aJoin(
     })
   }
 
-  const dataCols = table1Rows.length > 0 ? Object.keys(table1Rows[0]) : []
   const headers = [...table2Cols, ...dataCols, '_orderKey', '_billNo', '_matchStatus']
 
   let matchedCount = 0
@@ -204,8 +223,10 @@ export async function step2aJoin(
     currentBillNo += billNoStep
     // Template is the LEFT table: iterate over template rows
     for (const tmplRow of templateRows) {
-      const matchValue = strictKey(tmplRow[matchFieldTable2])
-      const matchingDataItems = matchValue ? (dataMap.get(matchValue) || []) : []
+      const matchValue = comboKey(tmplRow, templateMatchCols)
+      // 所有匹配列均为空 → 该模板行不参与匹配，辅助字段留空
+      const tmplKeyEmpty = templateMatchCols.every(c => !strictKey(tmplRow[c]))
+      const matchingDataItems = (!tmplKeyEmpty && matchValue) ? (dataMap.get(matchValue) || []) : []
 
       if (matchingDataItems.length > 0) {
         matchedCount++
@@ -222,8 +243,8 @@ export async function step2aJoin(
           row.push(orderKey, billNo, '匹配成功')
           rows.push(row)
         }
-      } else if (matchValue) {
-        // 模板字段有值但未匹配到：标记未匹配
+      } else if (!tmplKeyEmpty) {
+        // 匹配列有值但未匹配到：标记未匹配
         unmatchedCount++
         const row: any[] = []
         for (const col of table2Cols) {

@@ -44,8 +44,8 @@ declare global {
           table1Path: string
           table2Path: string
           groupByColumn: string
-          matchFieldTable1: string
-          matchFieldTable2: string
+          /** 目标表匹配键：支持多组，按组合值联合匹配 */
+          matchPairs: { mergedCol: string; templateCol: string }[]
           startBillNo: number
           billNoStep: number
           billNoBaseField: string
